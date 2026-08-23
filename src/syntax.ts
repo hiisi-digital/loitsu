@@ -66,6 +66,14 @@ export interface DanglingAttribute {
   readonly end: ByteOffset;
 }
 
+/**
+ * One place a macro is used, in whichever of the three shapes it took.
+ *
+ * An attribute with something beneath it to expand, a call, or an attribute
+ * with nothing beneath it. The last is kept rather than dropped because an
+ * attribute expanding into nothing is a mistake worth reporting, and a scanner
+ * that discarded it would have nothing to report it from.
+ */
 export type Use = AttributeUse | CallUse | DanglingAttribute;
 
 /** The callee's name, when the expression is a call to a plain identifier. */
