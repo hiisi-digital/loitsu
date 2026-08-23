@@ -15,7 +15,7 @@
   "imports": {
     "@std/assert": "jsr:@std/assert@^1.0.14",
     "typescript": "npm:typescript@^5.9.2",
-    "@hiisi/viola": "jsr:@hiisi/viola@^0.3.1",
+    "@hiisi/viola": "jsr:@hiisi/viola@^0.4.0",
     "@hiisi/viola-default-lints": "jsr:@hiisi/viola-default-lints@^0.3.2",
     "@hiisi/viola-grammar-ts": "jsr:@hiisi/viola-grammar-ts@^0.3.2"
   },
