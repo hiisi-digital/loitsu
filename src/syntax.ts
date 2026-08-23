@@ -32,7 +32,9 @@ export type ByteOffset = number & { readonly __byteOffset: unique symbol };
 /** Assert an offset belongs to `text`, which is the only way to make one. */
 export function offsetIn(text: string, at: number): ByteOffset {
   if (!Number.isInteger(at) || at < 0 || at > text.length) {
-    throw new RangeError(`offset ${at} is outside a source text of ${text.length} bytes`);
+    throw new RangeError(
+      `offset ${at} is outside a source text of ${text.length} bytes`,
+    );
   }
   return at as ByteOffset;
 }
@@ -77,7 +79,10 @@ export interface DanglingAttribute {
 export type Use = AttributeUse | CallUse | DanglingAttribute;
 
 /** The callee's name, when the expression is a call to a plain identifier. */
-function calleeName(call: ts.CallExpression, src: ts.SourceFile): string | undefined {
+function calleeName(
+  call: ts.CallExpression,
+  src: ts.SourceFile,
+): string | undefined {
   const callee = call.expression;
   const bare = ts.isNonNullExpression(callee) ? callee.expression : callee;
   return ts.isIdentifier(bare) ? bare.getText(src) : undefined;
@@ -87,7 +92,9 @@ function calleeName(call: ts.CallExpression, src: ts.SourceFile): string | undef
 function asAttributeCall(s: ts.Statement): ts.CallExpression | undefined {
   if (!ts.isExpressionStatement(s)) return undefined;
   const e = s.expression;
-  if (!ts.isArrayLiteralExpression(e) || e.elements.length !== 1) return undefined;
+  if (!ts.isArrayLiteralExpression(e) || e.elements.length !== 1) {
+    return undefined;
+  }
   const only = e.elements[0];
   return only !== undefined && ts.isCallExpression(only) ? only : undefined;
 }
@@ -119,9 +126,14 @@ export function uses(
       const target = list[i + 1];
 
       found.push(
-        target === undefined
-          ? { form: "dangling", name, start, end }
-          : { form: "attribute", name, args: call.arguments, start, end, target },
+        target === undefined ? { form: "dangling", name, start, end } : {
+          form: "attribute",
+          name,
+          args: call.arguments,
+          start,
+          end,
+          target,
+        },
       );
     });
   };

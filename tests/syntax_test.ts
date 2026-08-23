@@ -17,7 +17,11 @@ import { type Use, uses } from "../src/syntax.ts";
 /** A registry that knows `cfg` as an attribute and `env` as a call. */
 const known = registry([
   { kind: "attribute", name: "cfg", expand: (_a, item) => [item.node] },
-  { kind: "function", name: "env", expand: () => ts.factory.createStringLiteral("") },
+  {
+    kind: "function",
+    name: "env",
+    expand: () => ts.factory.createStringLiteral(""),
+  },
 ]);
 
 const find = (source: string): readonly Use[] => uses(source, known);
@@ -26,13 +30,18 @@ Deno.test("an attribute above an item attaches to the item", () => {
   const found = find(`[cfg(deno)]\nexport function readFile(): void {}\n`);
   assertEquals(found.length, 1);
   const [use] = found;
-  assert(use !== undefined && use.form === "attribute", "expected one attribute");
+  assert(
+    use !== undefined && use.form === "attribute",
+    "expected one attribute",
+  );
   assertEquals(use.name, "cfg");
   assertEquals(use.target.kind, ts.SyntaxKind.FunctionDeclaration);
 });
 
 Deno.test("an attribute inside a body attaches to the next statement", () => {
-  const found = find(`function b() {\n  [cfg(deno)]\n  const x = 1;\n  return x;\n}\n`);
+  const found = find(
+    `function b() {\n  [cfg(deno)]\n  const x = 1;\n  return x;\n}\n`,
+  );
   const [use] = found;
   assert(use !== undefined && use.form === "attribute");
   assertEquals(use.target.kind, ts.SyntaxKind.VariableStatement);
@@ -40,7 +49,10 @@ Deno.test("an attribute inside a body attaches to the next statement", () => {
 
 Deno.test("a name the registry does not know is not an attribute", () => {
   // somebody's own code, shaped like an attribute by coincidence. it is theirs.
-  assertEquals(find(`[sideEffect()]\nexport function f(): void {}\n`).length, 0);
+  assertEquals(
+    find(`[sideEffect()]\nexport function f(): void {}\n`).length,
+    0,
+  );
 });
 
 Deno.test("an array that is not a statement is not an attribute", () => {
@@ -48,13 +60,19 @@ Deno.test("an array that is not a statement is not an attribute", () => {
 });
 
 Deno.test("an array of more than one element is not an attribute", () => {
-  assertEquals(find(`[cfg(deno), cfg(node)]\nexport function f(): void {}\n`).length, 0);
+  assertEquals(
+    find(`[cfg(deno), cfg(node)]\nexport function f(): void {}\n`).length,
+    0,
+  );
 });
 
 Deno.test("an attribute with nothing beneath it is reported, not ignored", () => {
   const found = find(`function b() {\n  const x = 1;\n  [cfg(deno)]\n}\n`);
   const [use] = found;
-  assert(use !== undefined && use.form === "dangling", "a dangling attribute must be reported");
+  assert(
+    use !== undefined && use.form === "dangling",
+    "a dangling attribute must be reported",
+  );
   assertEquals(use.name, "cfg");
 });
 

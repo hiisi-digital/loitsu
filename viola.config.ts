@@ -14,8 +14,10 @@ import { report, viola, when } from "@hiisi/viola";
 
 export default viola()
   .use(defaultLints)
-  // the grammar is what turns a file into something a lint can ask questions of
-  .add(typescript).as("typescript")
+  // the grammar is what turns a file into something a lint can ask questions
+  // of. the alias defaults to the grammar's own id, so naming it "typescript"
+  // said the same thing twice.
+  .add(typescript)
   // anything a linter has any confidence in at all is a failure. a warning
   // is a finding nobody acts on, and a gate that warns is not a gate. the
   // floor was 50 and everything under it passed silently.

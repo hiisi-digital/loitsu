@@ -19,14 +19,16 @@ import config from "./viola.config.ts";
 import { runProject } from "@hiisi/viola";
 
 if (import.meta.main) {
-  Deno.exit(await runProject({
-    projectRoot: new URL(".", import.meta.url).pathname,
-    // The whole package. Every one of these ran `--include .` before, and
-    // the in-process crawler takes a file as readily as a directory, so
-    // nothing has to be enumerated and nothing gets left out by an enumeration
-    // that went stale.
-    include: ["."],
-    preloadedConfig: config,
-    env: Deno.env.toObject(),
-  }));
+  Deno.exit(
+    await runProject({
+      projectRoot: new URL(".", import.meta.url).pathname,
+      // The whole package. Every one of these ran `--include .` before, and
+      // the in-process crawler takes a file as readily as a directory, so
+      // nothing has to be enumerated and nothing gets left out by an enumeration
+      // that went stale.
+      include: ["."],
+      preloadedConfig: config,
+      env: Deno.env.toObject(),
+    }),
+  );
 }

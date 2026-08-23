@@ -66,12 +66,14 @@ export function spanning(spans: readonly Span[]): SpanTable {
     }
     if (span.outStart < reach) {
       throw new RangeError(
-        `a span starting at ${span.outStart} overlaps the one ending at ${reach}, `
-          + "so a position inside the overlap has two answers",
+        `a span starting at ${span.outStart} overlaps the one ending at ${reach}, ` +
+          "so a position inside the overlap has two answers",
       );
     }
     if (span.inStart < 0) {
-      throw new RangeError(`a span from source offset ${span.inStart} starts before the text`);
+      throw new RangeError(
+        `a span from source offset ${span.inStart} starts before the text`,
+      );
     }
     reach = span.outStart + span.length;
   }
@@ -80,7 +82,9 @@ export function spanning(spans: readonly Span[]): SpanTable {
 
 /** The identity table for a transform that moved nothing, over a text of `length` bytes. */
 export function identity(length: number): SpanTable {
-  return length === 0 ? { spans: [] } : spanning([{ outStart: 0, length, inStart: 0 }]);
+  return length === 0
+    ? { spans: [] }
+    : spanning([{ outStart: 0, length, inStart: 0 }]);
 }
 
 /**
@@ -92,7 +96,10 @@ export function identity(length: number): SpanTable {
  * be a guess wearing a citation, so it is refused instead and the caller decides
  * what to say.
  */
-export function sourceOffset(table: SpanTable, out: number): number | undefined {
+export function sourceOffset(
+  table: SpanTable,
+  out: number,
+): number | undefined {
   const { spans } = table;
   let low = 0;
   let high = spans.length - 1;
