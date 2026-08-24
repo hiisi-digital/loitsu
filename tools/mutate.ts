@@ -44,6 +44,12 @@ const NEVER_AT = `    ${NEVER}`;
  * takes: one that returns from the method and one that skips a loop iteration. */
 const NEVER_RETURN = "    if (false) return;";
 const NEVER_CONTINUE = "    if (false) continue;";
+/** The same two shapes at the indentation a nested block sits at. */
+const NEVER_CONTINUE_IN = "        if (false) continue;";
+const NEVER_IN = "    if (false) {";
+/** A statement removed by replacing it with one that does nothing, which is how a
+ * step whose absence has to be noticed downstream is tested. */
+const DOES_NOTHING = "  void 0;";
 
 /** Where an attribute's replacement stops. Named because two mutations move it, and
  * one of them is the other's line with the attribute's own start put back. */
@@ -135,6 +141,146 @@ const PLANS: Record<string, readonly Mutation[]> = {
       [
         "the probe never writes, so the write denial is asserted against nothing",
         "    /* kept */;",
+      ],
+    ),
+  ],
+  "src/translate.ts": [
+    ...ways(
+      "  return { start, length: end - start };",
+      [
+        "a range's length is measured backwards",
+        "  return { start, length: start - end };",
+      ],
+      [
+        "a range's length is its end, so every range starts from the same place",
+        "  return { start, length: end };",
+      ],
+    ),
+    ...ways(
+      "    return outputOffsets(this.#pair.spans, offset)",
+      [
+        "an authored position answers with only its first image, so a rename\n      // driven off it reaches one arm and silently leaves the others",
+        "    return outputOffsets(this.#pair.spans, offset).slice(0, 1)",
+      ],
+    ),
+    ...ways(
+      "    return back === undefined",
+      [
+        "a twin position with no authored image is answered with one anyway",
+        "    return false",
+      ],
+    ),
+    ...ways(
+      "  if (here === undefined) return undefined;",
+      [
+        "a diagnostic on text nobody wrote is reported rather than dropped",
+        "  if (here === undefined) return diagnostic;",
+      ],
+    ),
+    ...ways(
+      "  for (const rest of ranges.slice(1)) {",
+      [
+        "the authored range a diagnostic sits on is also noted beside itself",
+        "  for (const rest of ranges.slice(0)) {",
+      ],
+      [
+        "a diagnostic covering two authored regions mentions only the first",
+        "  for (const rest of []) {",
+      ],
+    ),
+    ...ways(
+      "    if (one.location.uri !== uri) {",
+      [
+        "a related location in another file is moved through this document's table",
+        NEVER_IN,
+      ],
+      [
+        "a related location in this document is passed through unmoved",
+        "    if (true) {",
+      ],
+    ),
+    ...ways(
+      "    if (moved === undefined) continue;",
+      [
+        "a related location with no authored image is kept, pointing nowhere",
+        NEVER_CONTINUE,
+      ],
+    ),
+    ...ways(
+      "  if (related.length > 0) return { ...out, relatedInformation: related };",
+      [
+        "a diagnostic that had no related information leaves carrying an empty list",
+        "  if (true) return { ...out, relatedInformation: related };",
+      ],
+    ),
+    ...ways(
+      "  delete (out as { relatedInformation?: unknown }).relatedInformation;",
+      [
+        "the incoming related information survives unmapped when all of it was dropped",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "      if (ranges.length === 0) dropped++;",
+      [
+        "an edit naming only invented text is dropped without being counted",
+        "      if (false) dropped++;",
+      ],
+    ),
+    ...ways(
+      "        if (seen.has(key)) continue;",
+      [
+        "the same authored range from two twins becomes two edits of one place",
+        NEVER_CONTINUE_IN,
+      ],
+    ),
+    ...ways(
+      "        edits.push({ range, newText: newName });",
+      [
+        "the twin's replacement is spliced onto the authored range, inventing text",
+        "        edits.push({ range, newText: edit.newText });",
+      ],
+    ),
+    ...ways(
+      "  edits.sort((a, b) => comparePositions(a.range.start, b.range.start));",
+      [
+        "edits come back in the order the twins were asked, not in authored order",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    if (comparePositions(next.start, last.end) < 0) {",
+      [
+        "overlapping edits are handed to the client rather than refused",
+        NEVER_IN,
+      ],
+      [
+        "edits that merely touch are refused, which is the common case",
+        "    if (comparePositions(next.start, last.end) <= 0) {",
+      ],
+      [
+        "the comparison is against the previous start, so nesting is not seen",
+        "    if (comparePositions(next.start, last.start) < 0) {",
+      ],
+    ),
+    // Two mutations were written here and both were equivalent, because the
+    // comparison they broke had clauses no input could reach: two edits sharing a
+    // start overlap and are refused before anything can be distinguished by where
+    // they end. The answer was to delete the unreachable clauses rather than to
+    // hunt for a test, so the comparison is now over positions and the dedupe is
+    // over a key. What is left is reachable and is mutated below.
+    ...ways(
+      "  return a.line - b.line || a.character - b.character;",
+      [
+        "two positions on different lines compare as one position",
+        "  return a.character - b.character;",
+      ],
+    ),
+    ...ways(
+      "    `${range.end.line}:${range.end.character}`;",
+      [
+        "two edits starting in one place are the same however far each reaches",
+        "    ``;",
       ],
     ),
   ],
