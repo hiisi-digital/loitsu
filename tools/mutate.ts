@@ -70,6 +70,17 @@ const ITEM_END = "to = use.target.getEnd();";
  * hangs off for a `finally` and so has to repeat the body it keeps. */
 const DROP_TEMP = "    await Deno.remove(temp).catch(() => {});";
 
+/** Fragments two anchors share, named because a mutation plan is mostly one
+ * line written twice and the gate is right to say so. */
+const PASS_RANGE = "        return onRange(open.mapping, range);";
+const PASS_POINT = "        return onPoint(open.mapping, at);";
+const NOT_HELD = "        if (open === undefined) return undefined;";
+const DOWN_RANGE = "    (mapping, range) => mapping.toTwinRanges(range)[0],";
+const UP_RANGE = "    (mapping, range) => mapping.toSourceRanges(range)[0],";
+const POINT_UNCROSSED = "    (mapping, at) => at,";
+const FORGET_OPEN = "    this.#open.delete(uri);";
+const A_MAPPING = "      mapping: new Mapping({";
+
 /**
  * Several mutations of one line.
  *
@@ -1172,6 +1183,135 @@ ${DROP_TEMP}
       [
         "a list is walked as an object, so nothing absorbs a drop",
         NEVER_TOP,
+      ],
+    ),
+  ],
+
+  "src/documents.ts": [
+    ...ways(
+      "        return held === undefined ? disk(path) : Promise.resolve(held);",
+      [
+        "a twin is built from the file on disk rather than the editor's buffer",
+        "        return disk(path);",
+      ],
+    ),
+    ...ways(
+      "    this.#held.set(path, source);",
+      [
+        "what the editor holds is never handed to the expansion",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    await this.#twins.changed(path);",
+      [
+        "a change is not acknowledged, so a stale twin is served after an edit",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "      twin: twin?.code ?? source,\n" + A_MAPPING,
+      [
+        "the source stands in for the twin even when one was built",
+        "      twin: source,\n" + A_MAPPING,
+      ],
+    ),
+    ...ways(
+      "        spans: twin?.spans ?? identity(source.length),",
+      [
+        "every document maps as though nothing was expanded",
+        "        spans: identity(source.length),",
+      ],
+    ),
+    ...ways(
+      "    this.#open.set(uri, open);",
+      [
+        "an opened document is not remembered",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    if (open === undefined) return;\n" + FORGET_OPEN,
+      [
+        "closing a document nobody opened throws instead of doing nothing",
+        NEVER_RETURN + "\n" + FORGET_OPEN,
+      ],
+    ),
+    ...ways(
+      "    this.#held.delete(open.path);",
+      [
+        "a closed document's buffer is kept, so its twin never comes from disk again",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    this.#twins.forget(open.path);",
+      [
+        "a closed document's twin is kept",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    return [...this.#held.keys()].sort();",
+      [
+        "nothing is ever reported as buffered",
+        "    return [];",
+      ],
+    ),
+    ...ways(
+      "    return this.#twins.failure(fromFileUrl(uri));",
+      [
+        "a twin that failed to build is never reported as having failed",
+        "    return undefined;",
+      ],
+    ),
+    ...ways(
+      "    return this.#open.get(uri)?.mapping.toTwinRanges(range) ?? [range];",
+      [
+        "a range in a document this does not hold has no images at all",
+        "    return this.#open.get(uri)?.mapping.toTwinRanges(range) ?? [];",
+      ],
+    ),
+    ...ways(
+      "        if (open === undefined) return range;\n" + PASS_RANGE,
+      [
+        "a range in another file is dropped instead of passed on",
+        NOT_HELD + "\n" + PASS_RANGE,
+      ],
+    ),
+    ...ways(
+      "        if (open === undefined) return at;\n" + PASS_POINT,
+      [
+        "a position in another file is dropped instead of passed on",
+        NOT_HELD + "\n" + PASS_POINT,
+      ],
+    ),
+    ...ways(
+      DOWN_RANGE,
+      [
+        "a range going down is crossed in the wrong direction",
+        UP_RANGE,
+      ],
+    ),
+    ...ways(
+      "    (mapping, at) => mapping.toTwin(at)[0],",
+      [
+        "a position going down is not crossed at all",
+        POINT_UNCROSSED,
+      ],
+    ),
+    ...ways(
+      UP_RANGE,
+      [
+        "a range coming up is crossed in the wrong direction",
+        DOWN_RANGE,
+      ],
+    ),
+    ...ways(
+      "    (mapping, at) => mapping.toSource(at),",
+      [
+        "a position coming up is not crossed at all",
+        POINT_UNCROSSED,
       ],
     ),
   ],

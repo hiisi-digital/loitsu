@@ -99,3 +99,6 @@ export type {
   WatchOptions,
 } from "./src/watch.ts";
 export { interesting, Twins, watch } from "./src/watch.ts";
+
+export type { DocumentsOptions, Open } from "./src/documents.ts";
+export { Documents } from "./src/documents.ts";
