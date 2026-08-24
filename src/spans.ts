@@ -61,6 +61,28 @@ export interface SpanTable {
 export function spanning(spans: readonly Span[]): SpanTable {
   let reach = 0;
   for (const span of spans) {
+    // Before anything is compared, because every comparison below short-circuits on
+    // a value that is not a number and lets the span through. That matters because
+    // a table does not only arrive from code in here: `cache.ts` rebuilds one out of
+    // JSON and calls this the thing that makes a stored entry no more trusted than
+    // any other input. A hand-edited entry carrying `"outStart": "0"` is ordinary
+    // JSON, and unguarded it produced a lookup returning the string "03" out of a
+    // function declared to return a number.
+    for (
+      const [what, value] of [
+        ["outStart", span.outStart],
+        ["length", span.length],
+        ["inStart", span.inStart],
+      ] as const
+    ) {
+      if (!Number.isInteger(value)) {
+        throw new RangeError(
+          `a span's ${what} is ${
+            typeof value === "string" ? JSON.stringify(value) : String(value)
+          }, which is not a whole number of bytes`,
+        );
+      }
+    }
     if (span.length <= 0) {
       throw new RangeError(`a span covering ${span.length} bytes maps nothing`);
     }

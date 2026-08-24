@@ -31,6 +31,19 @@ interface Mutation {
  * the mutant compiles, accepts what the guard refused, and something downstream has to
  * notice. */
 const NEVER = "if (false) {";
+/** The tail of a multi-line call, shared by the mutations that swap one argument in
+ * it, so the two spellings cannot drift apart from each other or from the source. */
+const CALL_END = "\n    );";
+/** What follows the foreign-node refusal in `expand`. Shared by the mutation that
+ * removes the refusal and the one that restores it, so the two cannot drift apart
+ * and quietly stop matching the source. */
+const AFTER_REFUSAL = "\n    }\n\n    markLeaves(produced, marker, src);";
+/** The same, at the indentation a method body sits at. */
+const NEVER_AT = `    ${NEVER}`;
+/** A guard removed by making its condition unreachable, in the two shapes a guard
+ * takes: one that returns from the method and one that skips a loop iteration. */
+const NEVER_RETURN = "    if (false) return;";
+const NEVER_CONTINUE = "    if (false) continue;";
 
 /** Where an attribute's replacement stops. Named because two mutations move it, and
  * one of them is the other's line with the attribute's own start put back. */
@@ -56,6 +69,50 @@ function ways(
 
 const PLANS: Record<string, readonly Mutation[]> = {
   "src/spans.ts": [
+    // `spanning`, `identity`, `sourceOffset` and `outputOffsets` had no mutations at
+    // all, which is four of seven exports and includes the constructor every other
+    // claim in the module rests on. A review found the gap; the suite caught every
+    // mutation written to close it, so what was missing was the harness's account of
+    // itself rather than the coverage.
+    ...ways(
+      "      if (!Number.isInteger(value)) {",
+      [
+        "spanning stops checking that a span's fields are whole numbers",
+        `  ${NEVER_AT}`,
+      ],
+      [
+        "spanning accepts a fractional offset",
+        '      if (typeof value !== "number") {',
+      ],
+    ),
+    ...ways(
+      "    if (span.length <= 0) {",
+      ["spanning accepts an empty span", "    if (span.length < 0) {"],
+      ["spanning accepts any span", NEVER_AT],
+    ),
+    ...ways(
+      "    if (span.outStart < reach) {",
+      ["spanning accepts overlapping spans", NEVER_AT],
+      [
+        "spanning refuses spans that merely touch",
+        "    if (span.outStart <= reach) {",
+      ],
+    ),
+    {
+      what: "spanning stops refusing a source offset before the text",
+      from: "    if (span.inStart < 0) {",
+      to: NEVER_AT,
+    },
+    {
+      what: "spanning shares its input array instead of copying it",
+      from: "  return { spans: [...spans] };",
+      to: "  return { spans };",
+    },
+    {
+      what: "identity claims a span over an empty text",
+      from: "  return length === 0",
+      to: "  return length === -1",
+    },
     {
       what: "compose reads its arguments the other way round",
       from: "const from = late.inStart, to = late.inStart + late.length;",
@@ -177,6 +234,18 @@ const PLANS: Record<string, readonly Mutation[]> = {
     },
   ],
   "src/cache.ts": [
+    ...ways(
+      '  const key = await keyOf(text, `${against}:${dialectOf(fileName ?? "")}`);',
+      [
+        "the dialect leaves the key, so a tsx file is served a ts twin",
+        "  const key = await keyOf(text, against);",
+      ],
+      [
+        "the file name joins the key, so two identical files never share an entry",
+        "  const key = await keyOf(text, `${against}:${fileName}`);",
+      ],
+    ),
+
     {
       what: "an empty XDG value is taken as a real directory",
       from: "xdg && xdg.length > 0",
@@ -245,20 +314,47 @@ ${DROP_TEMP}
     {
       what: "no cache home is an error rather than an answer",
       from:
-        "if (dir === undefined) return { ...expand(text, reg), hit: false };",
-      to: 'if (dir === undefined) throw new Error("no cache home");',
+        "  if (dir === undefined) return { ...expand(text, reg, options), hit: false };",
+      to: '  if (dir === undefined) throw new Error("no cache home");',
     },
   ],
   "src/expand.ts": [
+    ...ways(
+      "    if (leaf.getSourceFile() !== src) continue;",
+      ["a leaf from another file is marked anyway", NEVER_CONTINUE],
+      [
+        "the provenance check is inverted",
+        "    if (leaf.getSourceFile() === src) continue;",
+      ],
+    ),
+    ...ways(
+      "    if (file !== undefined && file !== src) return node;",
+      ["a foreign node is no longer detected", "    if (false) return node;"],
+      [
+        "a constructed node counts as foreign",
+        "    if (file !== src) return node;",
+      ],
+      [
+        "only the top node is checked, never a foreign child",
+        "    if (file !== undefined && file !== src) return undefined;",
+      ],
+    ),
     {
-      what: "leaves also collects nodes that have children",
-      from: "if (children === 0 && node.pos >= 0",
-      to: "if (node.pos >= 0",
+      what: "a foreign expansion is spliced in rather than refused",
+      from: `      return { code, spans, diagnostics };${AFTER_REFUSAL}`,
+      to: `      /* fall through */${AFTER_REFUSAL}`,
     },
     {
-      what: "leaves collects constructed nodes too",
-      from: "node.pos >= 0 && node.end > node.pos",
-      to: "node.end >= node.pos",
+      what:
+        "the file name never reaches the parse, so every tsx file is read as ts",
+      from: '  const fileName = options.fileName ?? "loitsu.ts";',
+      to: '  const fileName = "loitsu.ts";',
+    },
+
+    {
+      what: "leaves also collects nodes that have children",
+      from: "  if (children === 0) into.add(node);",
+      to: "  into.add(node);",
     },
     {
       what: "render skips the byte comparison",
@@ -295,8 +391,8 @@ ${DROP_TEMP}
     },
     {
       what: "next takes an unknown name as a macro",
-      from: "if (known && (pick === undefined",
-      to: "if ((pick === undefined",
+      from: '    if (!known || use.form === "dangling") continue;',
+      to: NEVER_CONTINUE,
     },
     ...ways(
       "spans = compose(spans, spliced.spans);",

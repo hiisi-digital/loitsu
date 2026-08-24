@@ -48,6 +48,23 @@ export interface Marked {
  * marker from the first resolve against the second, and the failure would be a
  * span pointing into a file nobody asked about.
  */
+/** A tag for one expansion run.
+ *
+ * Not `Math.random().toString(36).slice(2, 10)`. `Math.random()` may return exactly
+ * 0, whose base-36 form is `"0"`, so slicing from index 2 gives the empty string and
+ * the constructor below throws on it. Nor a loop topping that up, which was the first
+ * repair and does not terminate for the same input.
+ *
+ * `getRandomValues` has no such value. It fills the array, every byte becomes exactly
+ * two hex digits, and the length is fixed by construction rather than by trimming
+ * something of unknown size.
+ */
+function randomNonce(): string {
+  const bytes = new Uint8Array(4);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export class Marker {
   readonly #nonce: string;
   #next = 0;
@@ -58,7 +75,7 @@ export class Marker {
     return this.#nonce;
   }
 
-  constructor(nonce: string = Math.random().toString(36).slice(2, 10)) {
+  constructor(nonce: string = randomNonce()) {
     if (!/^[a-z0-9]+$/.test(nonce)) {
       throw new RangeError(
         `a nonce is lower-case alphanumeric so it survives a comment; got ${

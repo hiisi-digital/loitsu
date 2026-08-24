@@ -336,3 +336,44 @@ Deno.test("the harness can fail, so the agreements above mean something", async 
     await Deno.remove(dir, { recursive: true });
   }
 });
+
+Deno.test("two dialects with the same bytes do not share an entry", async () => {
+  // The bytes are identical and the expansions are not, so a key over the text
+  // alone serves a `.tsx` file the twin of a `.ts` one. The failure is silent: the
+  // entry is well-formed, its spans hold, and it is a twin of a different language.
+  const dir = await temp();
+  try {
+    const { reg } = counting();
+    // A macro has to fire, or both dialects hand the text straight back and the two
+    // codes match for a reason that has nothing to do with the key.
+    const src =
+      `[cfg(deno)]\nexport function View() {\n  return <div className="a">t</div>;\n}\n`;
+    const asTs = await cached(src, "v1", reg, dir, "a.ts");
+    const asTsx = await cached(src, "v1", reg, dir, "a.tsx");
+    assertEquals(asTs.hit, false);
+    assertEquals(
+      asTsx.hit,
+      false,
+      "the second is a miss, so it is not served the first's twin",
+    );
+    assertNotEquals(asTsx.code, asTs.code, "and the two twins differ");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("two files of one dialect with the same bytes do share an entry", async () => {
+  // The control. Keying on the file name instead of the dialect would pass the
+  // test above and lose this, which is most of what a cache buys over a repository.
+  const dir = await temp();
+  try {
+    const { reg } = counting();
+    const first = await cached(SRC, "v1", reg, dir, "a.ts");
+    const second = await cached(SRC, "v1", reg, dir, "deep/b.ts");
+    assertEquals(first.hit, false);
+    assertEquals(second.hit, true);
+    assertEquals(second.code, first.code);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});

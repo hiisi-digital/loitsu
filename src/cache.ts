@@ -23,6 +23,7 @@
 
 import { expand, type Expanded } from "./expand.ts";
 import type { Registry } from "./macro.ts";
+import { dialectOf } from "./syntax.ts";
 import { type Span, spanning } from "./spans.ts";
 
 /**
@@ -186,12 +187,20 @@ export async function cached(
   against: string,
   reg: Registry,
   dir: string | undefined,
+  fileName?: string,
 ): Promise<Cached> {
-  if (dir === undefined) return { ...expand(text, reg), hit: false };
-  const key = await keyOf(text, against);
+  const options = { fileName };
+  if (dir === undefined) return { ...expand(text, reg, options), hit: false };
+  // The dialect joins the tag rather than the text, because it is the other thing
+  // the expansion depends on. The file's name is deliberately not in the key: two
+  // files with the same bytes and the same dialect expand identically and should
+  // share an entry, which is most of what a cache buys across a repository. Two
+  // files with the same bytes and different dialects do not, and keying on the name
+  // would miss the first while keying on nothing would confuse the second.
+  const key = await keyOf(text, `${against}:${dialectOf(fileName ?? "")}`);
   const found = await read(dir, key);
   if (found !== undefined) return { ...found, hit: true };
-  const fresh = expand(text, reg);
+  const fresh = expand(text, reg, options);
   await write(dir, key, fresh);
   return { ...fresh, hit: false };
 }

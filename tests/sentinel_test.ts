@@ -321,3 +321,41 @@ Deno.test("the harness can fail, so the survivals above mean something", () => {
   const { lost } = strip("", marker);
   assertEquals(lost.length, 1, "strip must be able to report a loss");
 });
+
+Deno.test("a default nonce is never empty, even at the one value that breaks it", () => {
+  // `Math.random()` is documented to return a value in [0, 1), zero included.
+  // `(0).toString(36)` is "0", and slicing that from index 2 gives "", which the
+  // constructor rejects. So the one input the generator is guaranteed to be handed
+  // eventually is the one it crashed on.
+  //
+  // Worth keeping even though the generator no longer reads `Math.random` at all,
+  // because this test is what caught the first repair: topping the string up in a
+  // loop does not terminate on the same input, and the suite hung instead of
+  // failing. It now pins that the nonce does not depend on `Math.random` either way.
+  const real = Math.random;
+  try {
+    Math.random = () => 0;
+    const marker = new Marker();
+    assertEquals(marker.nonce.length > 0, true);
+    assertEquals(
+      /^[a-z0-9]+$/.test(marker.nonce),
+      true,
+      "and it is a legal nonce, not merely non-empty",
+    );
+
+    // The control: the generator must not be a constant that happens to be legal.
+    Math.random = real;
+    const another = new Marker();
+    assertEquals(/^[a-z0-9]+$/.test(another.nonce), true);
+  } finally {
+    Math.random = real;
+  }
+});
+
+Deno.test("two default nonces differ, which is what keeps two runs apart", () => {
+  // The property the whole marker scheme rests on, and the one a constant nonce
+  // would silently break while passing every test about a single run.
+  const seen = new Set<string>();
+  for (let i = 0; i < 200; i++) seen.add(new Marker().nonce);
+  assertEquals(seen.size > 190, true, `only ${seen.size} distinct in 200`);
+});

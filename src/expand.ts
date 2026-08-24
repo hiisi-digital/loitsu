@@ -29,7 +29,7 @@
 
 import ts from "typescript";
 import type { Registry } from "./macro.ts";
-import { type Use, uses } from "./syntax.ts";
+import { type AttributeUse, type CallUse, type Use, uses } from "./syntax.ts";
 import {
   compose,
   identity,
@@ -81,7 +81,12 @@ function leaves(node: ts.Node, into: Set<ts.Node>): void {
     children++;
     leaves(child, into);
   });
-  if (children === 0 && node.pos >= 0 && node.end > node.pos) into.add(node);
+  // Only childlessness. The two guards that used to sit here, a non-negative
+  // position and a non-empty range, decide nothing now: `markLeaves` refuses any
+  // node that does not belong to this file, which is every constructed one and so
+  // every node whose position is negative, and it already refuses a zero-length
+  // range. A condition that cannot change an outcome is one more line to keep true.
+  if (children === 0) into.add(node);
 }
 
 /** Mark every mappable leaf under `nodes`, and say what each was marked as.
@@ -104,9 +109,60 @@ function markLeaves(
   const found = new Set<ts.Node>();
   for (const node of nodes) leaves(node, found);
   for (const leaf of found) {
+    // Provenance, not just position. A node carries a range whether or not it ever
+    // came from this file: `ts.setTextRange` on a constructed node sets one, and a
+    // node parsed out of some other file arrives with its own. Marking either takes
+    // a range on trust and maps authored text to something that was never there.
+    //
+    // Comparing the printed bytes does not catch it. That check is necessary and not
+    // sufficient: it establishes that the bytes match the claimed range, never that
+    // the range is where the node came from, so a claim whose bytes happen to
+    // coincide sails through it and yields a span that is simply wrong.
+    //
+    // `getSourceFile` separates all of it. A node parsed from this file answers with
+    // it; one parsed elsewhere answers with that file; a constructed node answers
+    // `undefined`, whether or not somebody set a range on it.
+    if (leaf.getSourceFile() !== src) continue;
     const start = leaf.getStart(src), length = leaf.getEnd() - start;
     if (length > 0) marker.mark(leaf, start, length);
   }
+}
+
+/** The first node in `nodes` that was parsed out of a file other than `src`, if
+ * there is one.
+ *
+ * A macro is free to build whatever it likes, and `Expansion` is just
+ * `readonly ts.Statement[]`, so parsing a template is both the obvious way to write
+ * one and permitted by the type. It cannot be allowed through here, because the
+ * printer is handed this file and slices it at whatever positions the node carries.
+ * A foreign node's positions are an offset into a different text, so what gets
+ * printed is a fragment of the user's own source chosen at random.
+ *
+ * That failure is silent and total: the output still parses, the span table still
+ * maps every byte back to text the user really wrote, and every law about the map
+ * holds. Only the twin is wrong. So it is refused rather than repaired.
+ */
+function foreign(
+  nodes: readonly ts.Node[],
+  src: ts.SourceFile,
+): ts.Node | undefined {
+  const seen = new Set<ts.Node>();
+  const walk = (node: ts.Node): ts.Node | undefined => {
+    if (seen.has(node)) return undefined;
+    seen.add(node);
+    const file = node.getSourceFile();
+    if (file !== undefined && file !== src) return node;
+    let bad: ts.Node | undefined;
+    ts.forEachChild(node, (child) => {
+      bad ??= walk(child);
+    });
+    return bad;
+  };
+  for (const node of nodes) {
+    const bad = walk(node);
+    if (bad !== undefined) return bad;
+  }
+  return undefined;
 }
 
 /** Print `nodes`, then take the markers back out and say where each landed. */
@@ -191,25 +247,47 @@ function splice(
  * reader expects and the only one under which an attribute can inspect what it
  * is given.
  */
-function next(found: readonly Use[], reg: Registry): Use | undefined {
-  let pick: Use | undefined;
+function next(
+  found: readonly Use[],
+  reg: Registry,
+): AttributeUse | CallUse | undefined {
+  let pick: AttributeUse | CallUse | undefined;
   for (const use of found) {
+    // Narrowed rather than filtered afterwards, because the return type is what
+    // makes the expander's dangling branch stop existing. A dangling attribute is
+    // never picked, so a runtime `else` for it was unreachable and had to be kept
+    // true forever with nothing able to exercise it.
     const known = use.form === "attribute"
       ? reg.attribute(use.name) !== undefined
       : use.form === "call"
       ? reg.function(use.name) !== undefined
       : false;
-    if (known && (pick === undefined || use.start > pick.start)) pick = use;
+    if (!known || use.form === "dangling") continue;
+    if (pick === undefined || use.start > pick.start) pick = use;
   }
   return pick;
+}
+
+/** What to expand against, beyond the macros themselves. */
+export interface ExpandOptions {
+  /** How many expansions to allow before deciding a macro expands into itself. */
+  readonly rounds?: number;
+  /** The name of the file this text came from. Its extension decides the dialect,
+   * and a `.tsx` file parsed as `.ts` comes apart into comparisons rather than
+   * failing, so a caller that has a path should pass it. */
+  readonly fileName?: string;
 }
 
 /** Expand every macro in `text` until none is left. */
 export function expand(
   text: string,
   reg: Registry,
-  rounds: number = ROUNDS,
+  options: ExpandOptions = {},
 ): Expanded {
+  const rounds = options.rounds ?? ROUNDS;
+  // Threaded into every parse below, including the ones on already-expanded code,
+  // because the dialect is a property of the file rather than of the round.
+  const fileName = options.fileName ?? "loitsu.ts";
   const diagnostics: Diagnostic[] = [];
   let code = text;
   let spans = identity(text.length);
@@ -217,7 +295,7 @@ export function expand(
   // Reported once, against the authored text, before anything moves. A dangling
   // attribute cannot expand, so it survives every round and would otherwise be
   // reported once per round at a position that drifts.
-  for (const use of uses(text, reg)) {
+  for (const use of uses(text, reg, fileName)) {
     if (use.form !== "dangling") continue;
     diagnostics.push({
       start: use.start,
@@ -227,7 +305,7 @@ export function expand(
   }
 
   for (let round = 0; round < rounds; round++) {
-    const use = next(uses(code, reg), reg);
+    const use = next(uses(code, reg, fileName), reg);
     if (use === undefined) return { code, spans, diagnostics };
 
     const marker = new Marker();
@@ -245,14 +323,25 @@ export function expand(
         node: use.target,
         attribute: { start: use.start, end: use.end },
       });
-    } else if (use.form === "call") {
+    } else {
+      // No third branch and no check for one. `next` returns an attribute or a call
+      // and nothing else, so this is a call by type rather than by assumption.
       const macro = reg.function(use.name)!;
       src = use.node.getSourceFile();
       from = use.start;
       to = use.end;
       produced = [macro.expand(use.args)];
-    } else {
-      // dangling: reported above, and there is nothing to run
+    }
+
+    const outsider = foreign(produced, src);
+    if (outsider !== undefined) {
+      diagnostics.push({
+        start: use.start,
+        length: use.end - use.start,
+        message:
+          `[${use.name}] returned a node parsed from another file (${outsider.getSourceFile().fileName}); ` +
+          "build the expansion with ts.factory, or reuse nodes from the item it was given",
+      });
       return { code, spans, diagnostics };
     }
 

@@ -251,7 +251,7 @@ Deno.test("the harness can fail, so the emptiness above means something", () => 
 });
 
 Deno.test("a singular reverse would fail these, which is why they are here", () => {
-  // Stated as a test rather than as a comment: the shape casey found and the
+  // Stated as a test rather than as a comment: the shape a review found and the
   // reason the surface is plural. An implementation returning only the first
   // image passes every other law in this file.
   const t = spanning([span(0, 5, 42), span(20, 5, 42), span(40, 5, 42)]);

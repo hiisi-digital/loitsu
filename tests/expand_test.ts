@@ -6,9 +6,13 @@
 /** The expander end to end: real macros, real text in, real text out, and the map
  * back checked against the authored bytes rather than against a remembered offset. */
 import ts from "typescript";
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertNotEquals,
+  assertStringIncludes,
+} from "@std/assert";
 import { registry } from "../src/macro.ts";
-import { expand } from "../src/expand.ts";
+import { expand, ROUNDS } from "../src/expand.ts";
 import { outputOffsets, sourceOffset } from "../src/spans.ts";
 
 const f = ts.factory;
@@ -179,7 +183,7 @@ Deno.test("a macro expanding into itself is stopped and reported, not run foreve
       ),
     // deno-lint-ignore no-explicit-any
   } as any]);
-  const out = expand(`const a = forever!();\n`, loop, 5);
+  const out = expand(`const a = forever!();\n`, loop, { rounds: 5 });
   assertEquals(out.diagnostics.length, 1);
   assertStringIncludes(
     out.diagnostics[0]!.message,
@@ -390,7 +394,7 @@ Deno.test("the round limit is the number of expansions, not a suggestion", () =>
     },
     // deno-lint-ignore no-explicit-any
   } as any]);
-  const out = expand(`const a = forever!();\n`, loop, 4);
+  const out = expand(`const a = forever!();\n`, loop, { rounds: 4 });
   assertEquals(ran, 4, "four rounds means the macro ran four times");
   assertEquals(out.diagnostics.length, 1);
   assertStringIncludes(
@@ -402,4 +406,250 @@ Deno.test("the round limit is the number of expansions, not a suggestion", () =>
 Deno.test("the harness can fail, so the agreements above mean something", () => {
   assertEquals(parses("function ("), false, "parses must be able to say no");
   assertEquals(every("aXbXc", "X"), [1, 3]);
+});
+
+Deno.test("a macro returning nodes parsed from another file is refused", async () => {
+  // Building an expansion by parsing a template is the obvious implementation and
+  // nothing in the type forbids it: `Expansion` is `readonly ts.Statement[]`.
+  //
+  // Left unguarded it is the worst failure this design has. The printer is handed
+  // the user's file and slices it at the foreign node's positions, so `const q = 1;`
+  // printed as `const  q  =  ge ;`: the literal `1` became two bytes taken from the
+  // middle of the word `target` on the user's own line. And every law here passes
+  // on it, because the span table then honestly maps `ge` back to the authored `ge`
+  // it really was sliced from. A corrupt twin with a truthful map.
+  const reg = registry([{
+    kind: "attribute",
+    name: "tpl",
+    expand: () => [
+      ...ts.createSourceFile(
+        "macro.ts",
+        "const q = 1;",
+        ts.ScriptTarget.Latest,
+        true,
+      ).statements,
+    ],
+    // deno-lint-ignore no-explicit-any
+  } as any]);
+
+  const src = `const target = 0;\n[tpl(x)]\nconst z = 2;\n`;
+  const out = expand(src, reg);
+  // Not `includes("ge")`: `target` contains those bytes, so that assertion is true
+  // of the untouched source too and would pass against no fix at all. What the
+  // unguarded expander emitted was `const  q  =  ge ;`, the literal replaced by a
+  // slice of the user's line, so that is what gets named.
+  assertEquals(
+    /const\s+q\s+=\s+ge/.test(out.code),
+    false,
+    "the literal was not replaced by a slice of the user's own line",
+  );
+  assertEquals(out.code, src, "nothing was spliced at all");
+  assertEquals(out.diagnostics.length, 1, "and it was reported");
+  assertStringIncludes(out.diagnostics[0]!.message, "another file");
+  await Promise.resolve();
+});
+
+Deno.test("the control: the same macro built with the factory expands fine", () => {
+  // Without this the refusal above could be a refusal of everything.
+  const reg = registry([{
+    kind: "attribute",
+    name: "tpl",
+    expand: () => [
+      ts.factory.createVariableStatement(
+        undefined,
+        ts.factory.createVariableDeclarationList([
+          ts.factory.createVariableDeclaration(
+            "q",
+            undefined,
+            undefined,
+            ts.factory.createNumericLiteral(1),
+          ),
+        ], ts.NodeFlags.Const),
+      ),
+    ],
+    // deno-lint-ignore no-explicit-any
+  } as any]);
+  const out = expand(`const target = 0;\n[tpl(x)]\nconst z = 2;\n`, reg);
+  assertStringIncludes(out.code, "const q = 1;");
+  assertEquals(out.diagnostics, []);
+});
+
+Deno.test("a constructed node claiming a range it did not come from gets no span", () => {
+  // The byte comparison in `render` was called the verification the marking pass
+  // leans on. It is necessary and it is not sufficient: it establishes that the
+  // printed bytes match the claimed range, never that the range is where the node
+  // came from. When the bytes coincide it passes and the span is still a lie.
+  //
+  // Here a macro claims the first `target`'s range for a node it prints in place of
+  // the second. The bytes match exactly, so the comparison waves it through, and the
+  // authored `target` on line one acquires an image it never had. A rename driven
+  // off that edits a word the author never selected, which is the partial-rename
+  // class the plural reverse map exists to prevent, arriving through the front door.
+  const reg = registry([{
+    kind: "attribute",
+    name: "relabel",
+    expand: (_args: readonly ts.Expression[], item: { node: ts.Statement }) => {
+      const file = item.node.getSourceFile();
+      const first = file.text.indexOf("target");
+      const id = ts.factory.createIdentifier("target");
+      ts.setTextRange(id, { pos: first, end: first + "target".length });
+      return [ts.factory.createVariableStatement(
+        undefined,
+        ts.factory.createVariableDeclarationList([
+          ts.factory.createVariableDeclaration(
+            id,
+            undefined,
+            undefined,
+            ts.factory.createNumericLiteral(9),
+          ),
+        ], ts.NodeFlags.Const),
+      )];
+    },
+    // deno-lint-ignore no-explicit-any
+  } as any]);
+
+  const src = `const target = 0;\n[relabel(x)]\nconst target2 = 2;\n`;
+  const out = expand(src, reg);
+  assertEquals(
+    outputOffsets(out.spans, src.indexOf("target")),
+    [src.indexOf("target")],
+    "the authored `target` has only the image it actually had",
+  );
+});
+
+/** How many JSX elements survive in `code`, read back in `dialect`. */
+function jsxIn(code: string, fileName: string): number {
+  const file = ts.createSourceFile(
+    fileName,
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  let found = 0;
+  const count = (node: ts.Node): void => {
+    if (ts.isJsxElement(node)) found++;
+    ts.forEachChild(node, count);
+  };
+  count(file);
+  return found;
+}
+
+Deno.test("a tsx file expands as tsx, and as ts it comes apart", () => {
+  // The dialect is not cosmetic and getting it wrong does not fail. Parsed as
+  // `.ts`, `<div className="a">` is a comparison against `div`, then a property
+  // access, then another comparison, and the printer writes that back out happily.
+  // The twin then parses, and type-checks a program the author never wrote.
+  //
+  // The assertion is on the shape rather than on the spelling, because the printer
+  // reformats JSX the same way it reindents everything else. What has to hold is
+  // that a JSX element is still a JSX element.
+  const reg = registry([{
+    kind: "attribute",
+    name: "cfg",
+    expand: (args: readonly ts.Expression[], item: { node: ts.Statement }) =>
+      named(args[0]!) === "deno" ? [item.node] : [],
+    // deno-lint-ignore no-explicit-any
+  } as any]);
+
+  const src =
+    `[cfg(deno)]\nexport function View() {\n  return <div className="a">text {x} more</div>;\n}\n`;
+
+  const right = expand(src, reg, { fileName: "View.tsx" });
+  assertEquals(jsxIn(right.code, "View.tsx"), 1, "the element survived");
+  assertEquals(
+    (ts.createSourceFile(
+      "View.tsx",
+      right.code,
+      ts.ScriptTarget.Latest,
+      true,
+      // deno-lint-ignore no-explicit-any
+    ) as any).parseDiagnostics.length,
+    0,
+    "and the twin parses",
+  );
+
+  // The control, and what makes the two assertions above mean something: the same
+  // text through the default dialect is the mangling this exists to prevent.
+  //
+  // Each twin is read back in its own dialect, which is the only pairing that says
+  // anything. Reading the `.ts` twin as `.tsx` finds an element too, because the
+  // comparisons it was mangled into parse as JSX again in the other dialect. A
+  // different element, of a different name, from text nobody wrote.
+  const wrong = expand(src, reg, { fileName: "View.ts" });
+  assertEquals(
+    jsxIn(wrong.code, "View.ts"),
+    0,
+    "as ts there is no element at all, which is how it came apart",
+  );
+  assertNotEquals(right.code, wrong.code);
+  assertEquals(
+    jsxIn(right.code, "View.tsx") > jsxIn(wrong.code, "View.ts"),
+    true,
+    "and the tsx path is the one that kept it",
+  );
+});
+
+Deno.test("a tsx file with no macros is left exactly as written", () => {
+  const src = `const e = <div className="a">text</div>;\n`;
+  assertEquals(expand(src, registry([]), { fileName: "a.tsx" }).code, src);
+});
+
+Deno.test("the round budget still works now that it shares a parameter", () => {
+  // `rounds` moved from a positional argument into the options object, and a
+  // caller passing `{ fileName }` alone must still get the default rather than
+  // zero rounds.
+  const loop = registry([{
+    kind: "function",
+    name: "forever",
+    expand: () => ts.factory.createIdentifier("forever!()"),
+    // deno-lint-ignore no-explicit-any
+  } as any]);
+  const capped = expand(`const a = forever!();\n`, loop, { rounds: 3 });
+  assertStringIncludes(capped.diagnostics.at(-1)!.message, "3 rounds");
+
+  const named2 = expand(`const a = forever!();\n`, loop, { fileName: "a.ts" });
+  assertStringIncludes(
+    named2.diagnostics.at(-1)!.message,
+    `${ROUNDS} rounds`,
+    "no rounds given means the default, not none",
+  );
+});
+
+Deno.test("a leaf whose printed bytes differ from its own source range is dropped", () => {
+  // What the byte comparison still catches once provenance is checked, and the
+  // reason it is not redundant. A numeric separator is the case: `1_000` is five
+  // bytes in the source and the printer emits four, on a node that fully belongs to
+  // this file. Provenance passes, because it does belong here. Retargeting a parsed
+  // node does not reach this, because the printer honours whatever range it is
+  // given and emits the bytes actually at it, so the mark stays truthful.
+  //
+  // Unguarded, the mark claims five source bytes for four printed ones and every
+  // position after the first is off by one against the underscore.
+  const src = `const a = 1;\n[keep(x)]\nconst big = 1_000;\n`;
+  const reg = registry([{
+    kind: "attribute",
+    name: "keep",
+    expand: (
+      _a: readonly ts.Expression[],
+      item: { node: ts.Statement },
+    ) => [item.node],
+    // deno-lint-ignore no-explicit-any
+  } as any]);
+
+  const out = expand(src, reg);
+  assertStringIncludes(out.code, "1000", "the printer dropped the separator");
+  assertEquals(out.code.includes("1_000"), false);
+
+  const at = out.code.indexOf("1000");
+  for (let i = 0; i < 4; i++) {
+    assertEquals(
+      sourceOffset(out.spans, at + i),
+      undefined,
+      `byte ${i} of the reprinted number claims nothing`,
+    );
+  }
+
+  // The control: the name beside it, whose bytes do survive printing, still maps.
+  const name = out.code.lastIndexOf("big");
+  assertEquals(sourceOffset(out.spans, name), src.indexOf("big"));
 });
