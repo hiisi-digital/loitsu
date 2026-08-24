@@ -39,5 +39,12 @@ export type {
 } from "./src/syntax.ts";
 export { offsetIn, uses } from "./src/syntax.ts";
 
-export type { Span, SpanTable } from "./src/spans.ts";
-export { identity, sourceOffset, spanning } from "./src/spans.ts";
+export type { Run, Span, SpanTable } from "./src/spans.ts";
+export {
+  identity,
+  outputOffsets,
+  outputRuns,
+  sourceOffset,
+  sourceRuns,
+  spanning,
+} from "./src/spans.ts";

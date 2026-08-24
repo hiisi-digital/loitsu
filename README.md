@@ -151,7 +151,7 @@ this has been used on and would want attention before it isn't.
 
 ## A note on the name
 
-*Loitsu* is Finnish for a spell or an incantation, which is roughly what a macro
+_Loitsu_ is Finnish for a spell or an incantation, which is roughly what a macro
 is: a short thing you write that turns into a longer thing you didn't.
 
 ## Support

@@ -12,13 +12,8 @@
  */
 
 import { assertEquals, assertThrows } from "@std/assert";
-import { identity, type Span, sourceOffset, spanning } from "../src/spans.ts";
-
-const span = (outStart: number, length: number, inStart: number): Span => ({
-  outStart,
-  length,
-  inStart,
-});
+import { identity, sourceOffset, type Span, spanning } from "../src/spans.ts";
+import { span } from "./spans_helpers.ts";
 
 // ---------------------------------------------------------------- construction
 
@@ -115,7 +110,11 @@ Deno.test("undefined for a gap is a real answer, not a failure", () => {
   // the nearest line would be a guess wearing a citation.
   const t = spanning([span(0, 5, 0), span(20, 5, 5)]);
   for (let i = 5; i < 20; i++) {
-    assertEquals(sourceOffset(t, i), undefined, `offset ${i} came from nowhere`);
+    assertEquals(
+      sourceOffset(t, i),
+      undefined,
+      `offset ${i} came from nowhere`,
+    );
   }
 });
 

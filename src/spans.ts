@@ -112,3 +112,120 @@ export function sourceOffset(
   }
   return undefined;
 }
+
+/** A contiguous run of bytes, in whichever text the function taking it names. */
+export interface Run {
+  readonly start: number;
+  readonly length: number;
+}
+
+/**
+ * Every place an authored offset ended up, in ascending output order.
+ *
+ * Plural, and that is the whole point. An expansion is a list of items, so a
+ * macro that derives something returns the item it was handed alongside what it
+ * derived, and the derived part names the authored symbol. One authored offset
+ * then has several images, and a singular answer edits one of them and leaves
+ * the rest, which is a partial rename that nothing reports.
+ *
+ * Empty is a real answer, the mirror of `undefined` from {@link sourceOffset}:
+ * an authored offset inside something a macro deleted has no image, and a caller
+ * that edits nothing there is correct.
+ *
+ * Ascending, and without sorting: {@link spanning} refuses a span starting before
+ * the previous one ends, so the table is ordered by output position and walking it
+ * produces images in that order already. A sort here would be unreachable, and an
+ * unreachable sort is a claim no test can hold.
+ *
+ * Linear in the number of spans, because the table is ordered by output position
+ * and this asks the other question. Building a second index would be the fix if
+ * it ever mattered, and per file it does not.
+ */
+export function outputOffsets(table: SpanTable, source: number): number[] {
+  const out: number[] = [];
+  for (const span of table.spans) {
+    const delta = source - span.inStart;
+    if (delta >= 0 && delta < span.length) out.push(span.outStart + delta);
+  }
+  return out;
+}
+
+/**
+ * The authored runs an output run covers, in order, with nothing inferred.
+ *
+ * A run rather than a range, and a list rather than one answer, because an output
+ * run routinely covers bytes that came from nowhere. `greet__deno` in a twin is
+ * five authored bytes followed by six the expander invented, so the honest answer
+ * is one run of five, not a range of eleven and not a refusal.
+ *
+ * Returning a hull instead would be a guess in exactly the case that matters: two
+ * authored runs with a gap between them have no single range containing only
+ * them, and a caller handed one would edit the text in between.
+ */
+export function sourceRuns(table: SpanTable, out: Run): Run[] {
+  if (out.length <= 0) return [];
+  const end = out.start + out.length;
+  const runs: Run[] = [];
+  for (const span of table.spans) {
+    const spanEnd = span.outStart + span.length;
+    if (spanEnd <= out.start) continue;
+    if (span.outStart >= end) break;
+    const from = Math.max(span.outStart, out.start);
+    const to = Math.min(spanEnd, end);
+    runs.push({
+      start: span.inStart + (from - span.outStart),
+      length: to - from,
+    });
+  }
+  // In authored order, which is not output order: a macro may reorder what it
+  // was handed, and the table is ordered by output position. Merging without
+  // sorting would then leave two halves of one authored word unjoined, which
+  // reads as two separate authored regions and is a different claim.
+  runs.sort((a, b) => a.start - b.start);
+  return merge(runs);
+}
+
+/**
+ * Every output run an authored run maps to, in ascending output order.
+ *
+ * The plural counterpart of {@link sourceRuns}, and what a rename is answered
+ * with: the authored range of a name goes in, and every place the expansion
+ * wrote that name comes out, so an edit can be applied to all of them at once.
+ *
+ * Ascending for the same reason {@link outputOffsets} is, and with no sort for
+ * the same reason. {@link sourceRuns} does sort, because its output is in
+ * authored order and the table is not.
+ */
+export function outputRuns(table: SpanTable, source: Run): Run[] {
+  if (source.length <= 0) return [];
+  const end = source.start + source.length;
+  const runs: Run[] = [];
+  for (const span of table.spans) {
+    const spanEnd = span.inStart + span.length;
+    if (spanEnd <= source.start || span.inStart >= end) continue;
+    const from = Math.max(span.inStart, source.start);
+    const to = Math.min(spanEnd, end);
+    runs.push({
+      start: span.outStart + (from - span.inStart),
+      length: to - from,
+    });
+  }
+  return merge(runs);
+}
+
+/** Join runs that touch, so a table split for its own reasons does not leak that
+ * split into an answer. Two spans describing adjacent bytes of one authored word
+ * are one run to anybody asking. */
+function merge(runs: readonly Run[]): Run[] {
+  const out: Run[] = [];
+  for (const run of runs) {
+    const last = out[out.length - 1];
+    if (last && last.start + last.length === run.start) {
+      out[out.length - 1] = {
+        start: last.start,
+        length: last.length + run.length,
+      };
+    } else out.push(run);
+  }
+  return out;
+}
