@@ -17,7 +17,8 @@
     "typescript": "npm:typescript@^5.9.2",
     "@hiisi/viola": "jsr:@hiisi/viola@^0.4.0",
     "@hiisi/viola-default-lints": "jsr:@hiisi/viola-default-lints@^0.4.0",
-    "@hiisi/viola-grammar-ts": "jsr:@hiisi/viola-grammar-ts@^0.4.0"
+    "@hiisi/viola-grammar-ts": "jsr:@hiisi/viola-grammar-ts@^0.4.0",
+    "tree-sitter-typescript": "npm:tree-sitter-typescript@0.23.2"
   },
   "publish": {
     "include": [
