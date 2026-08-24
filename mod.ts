@@ -55,3 +55,12 @@ export { Marker, strip } from "./src/sentinel.ts";
 
 export type { Diagnostic, Expanded } from "./src/expand.ts";
 export { expand, ROUNDS } from "./src/expand.ts";
+
+export type { Cached } from "./src/cache.ts";
+export {
+  cached,
+  cacheHome,
+  defaultHome,
+  keyOf,
+  VERSION as CACHE_VERSION,
+} from "./src/cache.ts";

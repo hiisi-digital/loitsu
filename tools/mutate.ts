@@ -36,6 +36,10 @@ const NEVER = "if (false) {";
  * one of them is the other's line with the attribute's own start put back. */
 const ITEM_END = "to = use.target.getEnd();";
 
+/** The store's cleanup. In both halves of one mutation, which swaps the `catch` it
+ * hangs off for a `finally` and so has to repeat the body it keeps. */
+const DROP_TEMP = "    await Deno.remove(temp).catch(() => {});";
+
 /**
  * Several mutations of one line.
  *
@@ -170,6 +174,79 @@ const PLANS: Record<string, readonly Mutation[]> = {
       what: "the nonce is accepted unvalidated",
       from: "if (!/^[a-z0-9]+$/.test(nonce)) {",
       to: NEVER,
+    },
+  ],
+  "src/cache.ts": [
+    {
+      what: "an empty XDG value is taken as a real directory",
+      from: "xdg && xdg.length > 0",
+      to: "xdg !== undefined",
+    },
+    {
+      what: "the version is left out of the path",
+      from: "`${base}/loitsu/v${VERSION}`",
+      to: "`${base}/loitsu`",
+    },
+    {
+      what: "the fallback is the home itself rather than its cache",
+      from: "`${home}/.cache`",
+      to: "home",
+    },
+    ...ways(
+      "`${against}${SEPARATOR}${text}`",
+      ["the key ignores what it was expanded against", "text"],
+      ["the key ignores the text", "against"],
+    ),
+    {
+      what: "the two halves of the key run together",
+      from: "${SEPARATOR}",
+      to: "",
+    },
+    {
+      what: "a stored entry's version is not checked",
+      from: "if (stored.version !== VERSION) return undefined;",
+      to: "",
+    },
+    {
+      what: "a stored span table is taken as given",
+      from: "spans: spanning(stored.spans),",
+      to: "spans: { spans: stored.spans },",
+    },
+    {
+      what: "a malformed entry's shape is not checked",
+      from:
+        'if (typeof stored.code !== "string" || !Array.isArray(stored.spans)) {',
+      to: NEVER,
+    },
+    {
+      what: "a failed store is allowed to throw",
+      from: `  } catch {
+${DROP_TEMP}
+  }`,
+      to: `  } finally {
+${DROP_TEMP}
+  }`,
+    },
+    {
+      what: "a hit is reported as a miss",
+      from: "return { ...found, hit: true };",
+      to: "return { ...found, hit: false };",
+    },
+    {
+      what: "the cache never stores anything",
+      from: "await write(dir, key, fresh);",
+      to: "",
+    },
+    {
+      what: "the cache is never read",
+      from: "const found = await read(dir, key);",
+      to: "const found = undefined;",
+    },
+    {
+      what: "no cache home is an error rather than an answer",
+      from:
+        "if (dir === undefined) return { ...expand(text, reg), hit: false };",
+      to: 'if (dir === undefined) throw new Error("no cache home");',
     },
   ],
   "src/expand.ts": [
