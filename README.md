@@ -164,8 +164,7 @@ arriving during a formatter walking a whole tree, rather than only at the end of
 it.
 
 A file that cannot be read is ordinary halfway through a save, so it is reported
-rather than thrown. `get` and `peek` answer with nothing and `failure` says
-why.
+rather than thrown. `get` and `peek` answer with nothing and `failure` says why.
 
 ```ts
 twins.failure("src/thing.ts")?.why; // "NotFound" while the editor is mid-write

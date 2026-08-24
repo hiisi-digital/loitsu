@@ -17,6 +17,12 @@
  * because it once was not: a crash mid-run left a mutant on disk, and the next
  * hour was spent debugging a bug that had been introduced deliberately.
  *
+ * A mutation is a real edit to a real file for as long as the suite runs against
+ * it, so anything else reading that file meanwhile reads the mutant. A second
+ * mutation run is refused outright by the lock below. An ordinary `deno task test`
+ * is not, and running one during a sweep produces failures that belong to a
+ * mutation rather than to the tree.
+ *
  * Run: `deno run -A tools/mutate.ts src/expand.ts tests/expand_test.ts`
  * with the mutations for that file listed in `PLANS` below.
  */
@@ -997,6 +1003,25 @@ if (await run() !== 0) {
   Deno.exit(2);
 }
 
+/** Held for the length of a run, so two of them cannot mutate at once.
+ *
+ * `createNew` is the whole mechanism: it fails when the file is there, which makes
+ * taking the lock and finding it taken one operation with no window between them.
+ *
+ * `MUTATE_LOCK` moves it, which is how the suite exercises the refusal without
+ * being granted write over the repository it is testing. */
+const LOCK = Deno.env.get("MUTATE_LOCK") ?? ".mutate.lock";
+try {
+  await Deno.writeTextFile(LOCK, `${Deno.pid}\n`, { createNew: true });
+} catch (err) {
+  if (!(err instanceof Deno.errors.AlreadyExists)) throw err;
+  console.error(
+    `${LOCK} is held, so a mutation run is already editing the tree. Wait for it,`,
+  );
+  console.error("or delete the lock if nothing is running.");
+  Deno.exit(3);
+}
+
 const original = await Deno.readTextFile(target);
 const survived: string[] = [];
 try {
@@ -1014,6 +1039,7 @@ try {
   }
 } finally {
   await Deno.writeTextFile(target, original);
+  await Deno.remove(LOCK);
 }
 
 console.log(`\n${survived.length} survived of ${plan.length}`);

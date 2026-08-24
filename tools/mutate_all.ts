@@ -31,7 +31,37 @@ const SWEEP: readonly (readonly [string, readonly string[]])[] = [
   ["src/expand.ts", ["tests/expand_test.ts"]],
   ["src/cache.ts", ["tests/cache_test.ts"]],
   ["src/watch.ts", ["tests/watch_test.ts"]],
+  ["src/position.ts", ["tests/position_test.ts", "tests/translate_test.ts"]],
+  ["src/translate.ts", ["tests/translate_test.ts"]],
+  ["tests/readme_test.ts", ["tests/readme_test.ts"]],
+  ["tests/sandbox_worker.ts", ["tests/sandbox_test.ts"]],
+  ["tests/sandbox_read_worker.ts", ["tests/sandbox_test.ts"]],
+  ["tests/sandbox_run_worker.ts", ["tests/sandbox_test.ts"]],
 ];
+
+/** Every file `tools/mutate.ts` carries a plan for.
+ *
+ * The list above is written by hand and the note on it says a plan not listed is
+ * never swept. That note is not a mechanism, and it did not hold: five plans sat
+ * outside the sweep while it reported clean. So the two are compared here, and a
+ * plan missing from the sweep stops the run rather than being quietly skipped.
+ */
+async function planned(): Promise<string[]> {
+  const source = await Deno.readTextFile("tools/mutate.ts");
+  const start = source.indexOf("const PLANS");
+  return [...source.slice(start).matchAll(/^  "([^"]+)": \[$/gm)]
+    .map((m) => m[1]!);
+}
+
+const missing = (await planned()).filter(
+  (one) => !SWEEP.some(([source]) => source === one),
+);
+if (missing.length > 0) {
+  console.error(
+    `these have a plan and are not swept: ${missing.join(", ")}`,
+  );
+  Deno.exit(2);
+}
 
 let survived = 0;
 let mutations = 0;
