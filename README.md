@@ -54,45 +54,74 @@ deno add jsr:@hiisi/loitsu
 
 ## Usage
 
-`loitsu` finds invocations and tells you what a macro would expand to. It does
-not run a build for you, which is deliberate: where expansion happens is a
-decision the consuming project should make, and every project that would use
-this already has an opinion about it.
+Here's the basic flow, and how the pieces fit together. A macro says what it
+expands into, `expand` runs them all and hands back a twin of your file, and the
+span table it comes with says which byte of the twin came from where.
 
 ```ts
-import { registry, uses } from "@hiisi/loitsu";
+import { cached, expand, registry, sourceRuns, uses } from "@hiisi/loitsu";
 import type { AttributeMacro, FunctionMacro } from "@hiisi/loitsu";
 import ts from "npm:typescript";
 
-// an attribute macro returns the items that stand in place of the one it sat
-// above. returning nothing is a real answer, and it's the one `cfg` gives when
-// its predicate doesn't hold: the item is never emitted, rather than emitted
-// and stripped later.
+// arguments arrive as expressions, because that's what the parser made of them.
+// `cfg(deno)` gives you an identifier and `cfg("deno")` a string literal, and both
+// spellings parse, so it's the macro that decides which of them it wants to accept.
+const word = (arg: ts.Expression): string =>
+  ts.isIdentifier(arg) ? arg.text : ts.isStringLiteral(arg) ? arg.text : "";
+
+// an attribute macro returns the items that stand in place of the one it sat above.
+// returning nothing is a real answer, and it's the one `cfg` gives when its
+// predicate doesn't hold: the item never gets emitted, rather than emitted and then
+// stripped again later.
 const cfg: AttributeMacro = {
   kind: "attribute",
   name: "cfg",
-  expand: (args, item) => args[0] === "deno" ? [item.node] : [],
+  expand: (args, item) => word(args[0]!) === "deno" ? [item.node] : [],
 };
 
 // a function macro returns the expression that replaces the call.
 const includeStr: FunctionMacro = {
   kind: "function",
   name: "include_str",
-  expand: (args) => ts.factory.createStringLiteral(String(args[0])),
+  expand: (args) =>
+    ts.factory.createStringLiteral(Deno.readTextFileSync(word(args[0]!))),
 };
 
 const known = registry([cfg, includeStr]);
 const source = Deno.readTextFileSync("src/thing.ts");
 
-// parsing, not text matching. an `!` inside a string and a `[` opening a real
-// array are both common, and only the parser reliably knows which is which.
+// parsing, not text matching. an `!` inside a string and a `[` opening a real array
+// are both common, and only the parser reliably knows which is which.
 for (const use of uses(source, known)) {
   console.log(use.form, use.name, use.start, use.end);
 }
+
+// the twin. `fileName` decides the dialect, and it matters more than it looks: a
+// tsx file read as ts doesn't fail, it parses into something else entirely and the
+// jsx comes apart into comparisons.
+const twin = expand(source, known, { fileName: "src/thing.ts" });
+
+// and back again. the checker complains about a byte of the twin, and this says
+// which bytes of what you actually wrote it was complaining about.
+const at = twin.code.indexOf("readConfig");
+sourceRuns(twin.spans, { start: at, length: 10 });
 ```
 
 `registry` refuses two macros with the same name rather than letting one quietly
 win.
+
+Expanding on every keystroke is work you already did, so `cached` keeps the twin
+under your cache directory, keyed on the file's bytes and on what it was
+expanded against:
+
+```ts
+const twin = await cached(source, "my-macros@1", known, dir, "src/thing.ts");
+twin.hit; // false the first time, true after
+```
+
+Nothing there is authoritative and none of it is meant to be committed. Losing
+the whole cache costs you some time and nothing else, and anything it can't
+verify on the way back in it throws away rather than trusts.
 
 ## What gets left alone
 
@@ -117,8 +146,8 @@ with room beside it.
 
 ## Source maps
 
-Expansion moves things, so `spans` maps an offset in the output back to where it
-came from:
+Expansion moves things around, so a span table says where each byte of the twin
+came from. Going forward is a function, one output byte from one source byte:
 
 ```ts
 import { identity, sourceOffset, spanning } from "@hiisi/loitsu";
@@ -131,23 +160,58 @@ const table = spanning([
 sourceOffset(table, 45); // 125
 ```
 
-`identity` gives you a table for text that wasn't moved, which is the honest
-thing to return when a pass did nothing rather than pretending it has no
-mapping.
+Going back is not a function, and this is the part that's easy to get wrong. A
+derive macro hands back the item it was given alongside the thing it derived
+from it, so one name you wrote can end up in two or three places in the twin.
+Ask for all of them:
+
+```ts
+import { outputOffsets, outputRuns, sourceRuns } from "@hiisi/loitsu";
+
+outputOffsets(table, 125); // every image of that source byte, ascending
+outputRuns(table, { start: 120, length: 15 }); // the same, for a range
+sourceRuns(table, { start: 40, length: 15 }); // and the other direction
+```
+
+A reverse that gives you one answer would rename one of the arms and quietly
+miss the rest, which is the kind of bug you only notice much later.
+
+`compose` chains two tables, for when expansion runs a macro at a time and each
+round has its own map. A byte survives only where both tables carry it, so
+something a macro generated has no source origin after composing, which is
+right: you didn't write it.
+
+`identity` gives a table for text nothing moved, which is the honest thing to
+return when a pass did nothing rather than pretending it has no mapping at all.
 
 Offsets are branded and made with `offsetIn(text, at)`, which checks the offset
-is actually inside that text. It's a small thing, but offsets crossing between
-files is the bug you spend an afternoon on.
+is actually inside that text. Small thing, but offsets crossing between files is
+the bug you spend an afternoon on.
 
 ## Limitations
 
-There's no build integration. You get the invocations and the expansions, and
-wiring that into a transform is yours to do. That may change, but the shape of
-it should be a consuming project's call rather than a default that's awkward to
-undo.
+The api hasn't settled and breaking changes should be expected. I'd caution
+against using this for anything serious just yet.
 
-Expansion is not incremental. Whole file at a time, which is fine at the sizes
-this has been used on and would want attention before it isn't.
+There's no editor integration yet, and no frontends. Expansion, the map, the
+cache and the watcher are here; a language server that serves the twin under
+your source uri and maps the diagnostics back is the next piece, and after that
+hooking into `deno check` and friends. The intent is that it just works once you
+depend on it, with at most a line in your `deno.json` or `package.json`, but
+that isn't true yet and I'd rather say so than let you find out.
+
+Expansion is whole file at a time, not incremental. Fine at the sizes this has
+been used on, and would want attention before it isn't.
+
+A macro has to build its expansion with `ts.factory`, or out of nodes from the
+item it was handed. Parsing a template and returning those nodes is refused,
+because the printer would slice your file at positions that mean something in a
+different one, and what comes out is a fragment of your own source picked more
+or less at random. That used to happen silently, which was worse.
+
+The cache doesn't evict anything yet. It's content-keyed, so editing a file
+leaves the old entry behind rather than replacing it, and over a long session
+that adds up. Deleting the directory is safe and is the workaround for now.
 
 ## A note on the name
 
