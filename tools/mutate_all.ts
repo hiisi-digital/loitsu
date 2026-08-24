@@ -34,6 +34,7 @@ const SWEEP: readonly (readonly [string, readonly string[]])[] = [
   ["src/position.ts", ["tests/position_test.ts", "tests/translate_test.ts"]],
   ["src/translate.ts", ["tests/translate_test.ts"]],
   ["src/rpc.ts", ["tests/rpc_test.ts"]],
+  ["src/protocol.ts", ["tests/protocol_test.ts"]],
   ["tests/readme_test.ts", ["tests/readme_test.ts"]],
   ["tests/sandbox_worker.ts", ["tests/sandbox_test.ts"]],
   ["tests/sandbox_read_worker.ts", ["tests/sandbox_test.ts"]],

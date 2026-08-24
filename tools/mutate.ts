@@ -53,6 +53,8 @@ const NEVER_CONTINUE = "    if (false) continue;";
 /** The same two shapes at the indentation a nested block sits at. */
 const NEVER_CONTINUE_IN = "        if (false) continue;";
 const NEVER_IN = "    if (false) {";
+/** The same, at the indentation a function body sits at. */
+const NEVER_TOP = "  if (false) {";
 /** The head of the header line `frame` writes. Shared by the mutation that leaves it
  * alone and the one that changes how the block ends, so the two cannot drift. */
 const WROTE = "    `Content-Length: ${body.length}";
@@ -1066,7 +1068,110 @@ ${DROP_TEMP}
       "  if (frames.pending > 0) {",
       [
         "a stream ending mid-message is treated as having ended cleanly",
-        "  if (false) {",
+        NEVER_TOP,
+      ],
+    ),
+  ],
+
+  "src/protocol.ts": [
+    ...ways(
+      '    typeof value.character === "number";',
+      [
+        "a line alone is read as a position, so an offset pair becomes one",
+        "    true;",
+      ],
+    ),
+    ...ways(
+      "  return isRecord(value) && isPosition(value.start) && isPosition(value.end);",
+      [
+        "the two names alone make a range, whatever sits under them",
+        '  return isRecord(value) && "start" in value && "end" in value;',
+      ],
+    ),
+    ...ways(
+      "  if (isRange(value)) {",
+      [
+        "a range crosses as its two ends separately rather than as a run",
+        NEVER_TOP,
+      ],
+    ),
+    ...ways(
+      "    return crossing.range(value, uri) ?? DROPPED;",
+      [
+        "a range with no image is kept as it was instead of dropped",
+        "    return crossing.range(value, uri) ?? value;",
+      ],
+    ),
+    ...ways(
+      "  if (isPosition(value)) return crossing.point(value, uri) ?? DROPPED;",
+      [
+        "a position with no image is kept as it was instead of dropped",
+        "  if (isPosition(value)) return crossing.point(value, uri) ?? value;",
+      ],
+    ),
+    ...ways(
+      "      if (crossed !== DROPPED) out.push(crossed);",
+      [
+        "a dropped element is kept, so the marker itself lands in the message",
+        "      out.push(crossed);",
+      ],
+    ),
+    ...ways(
+      "    if (crossed === DROPPED) return DROPPED;",
+      [
+        "dropping does not climb out of the object it happened in",
+        "    if (false) return DROPPED;",
+      ],
+    ),
+    ...ways(
+      '  const here = typeof value.uri === "string" ? value.uri : uri;',
+      [
+        "a document naming itself is ignored for everything under it",
+        "  const here = uri;",
+      ],
+      [
+        "the ambient document is dropped rather than carried down",
+        '  const here = typeof value.uri === "string" ? value.uri : undefined;',
+      ],
+    ),
+    ...ways(
+      '    const crossed = key === "changes" && isChanges(one)',
+      [
+        "a workspace edit's keys stop naming the documents they edit",
+        "    const crossed = false && isChanges(one)",
+      ],
+      [
+        "anything called changes is treated as a map of documents to edits",
+        '    const crossed = key === "changes"',
+      ],
+    ),
+    ...ways(
+      "    const crossed = carry(edits, crossing, uri) as unknown[];",
+      [
+        "an edit list is crossed without knowing which document it edits",
+        "    const crossed = carry(edits, crossing, undefined) as unknown[];",
+      ],
+    ),
+    ...ways(
+      "    if (crossed.length === 0) continue;",
+      [
+        "a file whose edits all dropped still gets an empty entry, so an editor " +
+        "opens it to change nothing",
+        NEVER_CONTINUE,
+      ],
+    ),
+    ...ways(
+      "  return isRecord(value) && Object.values(value).every(Array.isArray);",
+      [
+        "a changes field whose values are not edit lists is read as one anyway",
+        "  return isRecord(value);",
+      ],
+    ),
+    ...ways(
+      "  if (Array.isArray(value)) {",
+      [
+        "a list is walked as an object, so nothing absorbs a drop",
+        NEVER_TOP,
       ],
     ),
   ],
