@@ -138,6 +138,159 @@ const PLANS: Record<string, readonly Mutation[]> = {
       ],
     ),
   ],
+  "src/position.ts": [
+    ...ways(
+      "      if (ch === 0x0a) starts.push(at + 1);",
+      [
+        "a newline stops opening a line, so the whole text is one line",
+        "      if (false) starts.push(at + 1);",
+      ],
+    ),
+    ...ways(
+      "      else if (ch === 0x0d) {",
+      [
+        "a lone carriage return stops ending a line",
+        "      else if (false) {",
+      ],
+    ),
+    ...ways(
+      "        if (text.charCodeAt(at + 1) === 0x0a) at++;",
+      [
+        "a carriage return and newline becomes two lines instead of one",
+        "        if (false) at++;",
+      ],
+      [
+        "the pair is consumed even when the newline is not there",
+        "        at++;",
+      ],
+    ),
+    ...ways(
+      "      this.#text.charCodeAt(at - 1) === 0x0d",
+      [
+        "a line's content is measured as including its carriage return",
+        "      false",
+      ],
+    ),
+    ...ways(
+      "    const line = Math.min(Math.max(Math.trunc(at.line), 0), this.count - 1);",
+      [
+        "a line past the end is not clamped, so the lookup is undefined",
+        "    const line = Math.max(Math.trunc(at.line), 0);",
+      ],
+      [
+        "a negative line is not clamped",
+        "    const line = Math.min(Math.trunc(at.line), this.count - 1);",
+      ],
+      [
+        "the last line is one short, so the last line is unreachable",
+        "    const line = Math.min(Math.max(Math.trunc(at.line), 0), this.count - 2);",
+      ],
+    ),
+    ...ways(
+      "    const want = Math.max(Math.trunc(at.character), 0);",
+      [
+        "a negative character is not clamped to the start of the line",
+        "    const want = Math.trunc(at.character);",
+      ],
+    ),
+    ...ways(
+      '    if (encoding === "utf-16") return Math.min(from + want, to);',
+      [
+        "a character past the end of its line runs into the next one",
+        '    if (encoding === "utf-16") return from + want;',
+      ],
+      [
+        "utf-16 takes the counting path, which counts a pair as one unit",
+        "    if (false) return Math.min(from + want, to);",
+      ],
+    ),
+    ...ways(
+      "      if (counted + cost > want) return scan;",
+      [
+        "a column exactly on a boundary lands before it rather than on it",
+        "      if (counted + cost >= want) return scan;",
+      ],
+      [
+        "a wide character is entered rather than stopped before",
+        "      if (counted > want) return scan;",
+      ],
+    ),
+    ...ways(
+      "  if (code < 0x80) return 1;",
+      ["ascii is counted as two bytes", "  if (code < 0x80) return 2;"],
+      [
+        "the one byte range runs too far, so two byte characters count as one",
+        "  if (code < 0x100) return 1;",
+      ],
+    ),
+    ...ways(
+      "  if (code < 0x800) return 2;",
+      [
+        "the two byte range runs too far, so three byte characters count as two",
+        "  if (code < 0x1000) return 2;",
+      ],
+    ),
+    ...ways(
+      "  if (code < 0x10000) return 3;",
+      [
+        "a character outside the basic plane is counted as three bytes",
+        "  if (code < 0x110000) return 3;",
+      ],
+    ),
+    ...ways(
+      "      if (this.#starts[mid]! <= want) lo = mid;",
+      [
+        "the search excludes a line's own first offset, landing on the one before",
+        "      if (this.#starts[mid]! < want) lo = mid;",
+      ],
+    ),
+    ...ways(
+      "    const to = Math.min(want, this.endOf(lo));",
+      [
+        "an offset inside a carriage return and newline names the gap",
+        "    const to = want;",
+      ],
+    ),
+    ...ways(
+      "      if (wide && scan + 2 > to) break; // the offset splits a pair",
+      [
+        "an offset splitting a surrogate pair counts the whole pair",
+        "      if (false) break;",
+      ],
+    ),
+    ...ways(
+      "      const wide = code > 0xffff;",
+      [
+        "the last character of the basic plane is read as a surrogate pair",
+        "      const wide = code >= 0xffff;",
+      ],
+    ),
+    ...ways(
+      '      counted += encoding === "utf-8" ? utf8Width(code) : 1;',
+      [
+        "utf-32 counts bytes and utf-8 counts code points, the two swapped",
+        '      counted += encoding === "utf-8" ? 1 : utf8Width(code);',
+      ],
+    ),
+    ...ways(
+      '    if (one === "utf-8" || one === "utf-16" || one === "utf-32") return one;',
+      [
+        "an unrecognised encoding is accepted rather than skipped",
+        "    return one as Encoding;",
+      ],
+      [
+        "utf-8 is not recognised, so a client asking for it is answered in utf-16",
+        '    if (one === "utf-16" || one === "utf-32") return one;',
+      ],
+    ),
+    ...ways(
+      "  return DEFAULT_ENCODING;",
+      [
+        "a client offering nothing usable is answered in an encoding it may not have",
+        '  return "utf-8";',
+      ],
+    ),
+  ],
   "src/spans.ts": [
     // `spanning`, `identity`, `sourceOffset` and `outputOffsets` had no mutations at
     // all, which is four of seven exports and includes the constructor every other

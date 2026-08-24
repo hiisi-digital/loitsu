@@ -57,6 +57,9 @@ export { Marker, strip } from "./src/sentinel.ts";
 export type { Diagnostic, Expanded, ExpandOptions } from "./src/expand.ts";
 export { expand, ROUNDS } from "./src/expand.ts";
 
+export type { Encoding, Position, Range } from "./src/position.ts";
+export { DEFAULT_ENCODING, Lines, negotiate } from "./src/position.ts";
+
 export type { Cached } from "./src/cache.ts";
 export {
   cached,
