@@ -41,6 +41,7 @@ export { offsetIn, uses } from "./src/syntax.ts";
 
 export type { Run, Span, SpanTable } from "./src/spans.ts";
 export {
+  compose,
   identity,
   outputOffsets,
   outputRuns,

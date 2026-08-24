@@ -229,3 +229,42 @@ function merge(runs: readonly Run[]): Run[] {
   }
   return out;
 }
+
+/**
+ * Chain two tables, so a position in the final text names a position in the first.
+ *
+ * `first` maps an intermediate text back to what was authored; `second` maps the
+ * final text back to that intermediate. The result maps the final text back to
+ * what was authored, which is what an expander doing one macro per round needs
+ * after the second round.
+ *
+ * A byte survives only where both tables carry it. A run the second table maps
+ * into a region the first does not cover came from text the first round
+ * generated, so it has no authored origin and gets none here: dropping it is the
+ * whole point, and inventing one would put a diagnostic on a line somebody never
+ * wrote.
+ *
+ * Composition is not associative-by-luck and is not commutative. `compose(a, b)`
+ * reads right to left, the way function composition does.
+ */
+export function compose(first: SpanTable, second: SpanTable): SpanTable {
+  const out: Span[] = [];
+  for (const late of second.spans) {
+    // Where this run of the final text sits in the intermediate, and then which of
+    // the intermediate's own runs it overlaps. Both tables are ordered by their
+    // output, and `late` is ordered against the final text, so the result comes out
+    // ordered too and needs no sort.
+    const from = late.inStart, to = late.inStart + late.length;
+    for (const early of first.spans) {
+      const lo = Math.max(early.outStart, from);
+      const hi = Math.min(early.outStart + early.length, to);
+      if (lo >= hi) continue;
+      out.push({
+        outStart: late.outStart + (lo - from),
+        length: hi - lo,
+        inStart: early.inStart + (lo - early.outStart),
+      });
+    }
+  }
+  return spanning(out);
+}
