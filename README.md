@@ -193,12 +193,13 @@ the bug you spend an afternoon on.
 The api hasn't settled and breaking changes should be expected. I'd caution
 against using this for anything serious just yet.
 
-There's no editor integration yet, and no frontends. Expansion, the map, the
-cache and the watcher are here; a language server that serves the twin under
-your source uri and maps the diagnostics back is the next piece, and after that
-hooking into `deno check` and friends. The intent is that it just works once you
-depend on it, with at most a line in your `deno.json` or `package.json`, but
-that isn't true yet and I'd rather say so than let you find out.
+There's no editor integration yet, and no frontends. Expansion, the map and the
+cache are here; a file watcher that keeps twins current is next, then a language
+server that serves the twin under your source uri and maps the diagnostics back,
+and after that hooking into `deno check` and friends. The intent is that it just
+works once you depend on it, with at most a line in your `deno.json` or
+`package.json`, but that isn't true yet and I'd rather say so than let you find
+out.
 
 Expansion is whole file at a time, not incremental. Fine at the sizes this has
 been used on, and would want attention before it isn't.
