@@ -68,6 +68,49 @@ function ways(
 }
 
 const PLANS: Record<string, readonly Mutation[]> = {
+  // The sandbox tests pin Deno's behaviour rather than loitsu's, so there is no
+  // source of ours to mutate for most of what they claim. What is ours is the
+  // probe each worker runs, and a probe that reports the right answer whatever
+  // happened is how these tests would go quiet. Each arm here turns one probe
+  // into a liar and expects the suite to notice.
+  "tests/sandbox_read_worker.ts": [
+    ...ways(
+      "    read = (await Deno.readTextFile(e.data.path)).trim();",
+      [
+        "the probe never reads, so a denial and a granted read look alike",
+        '    read = "not for a macro";',
+      ],
+    ),
+    ...ways(
+      "    built = ts.createPrinter().printNode(",
+      [
+        "the probe answers a constant, so the compiler need not have run",
+        '    built = "const built__ok: number = 1;"; ((_: unknown) => {})(',
+      ],
+    ),
+    // The claim that the isolate loaded the compiler is carried by the import
+    // rather than by any line in the handler: a module that cannot load never
+    // evaluates, and the parent hears that instead of an answer. So the mutation
+    // that tests it is the one that takes the import away, and an echo of the
+    // name from inside the handler is not one, because the import above it still
+    // has to have succeeded for the handler to run at all.
+    ...ways(
+      'import ts from "typescript";',
+      [
+        "nothing in the isolate is the compiler, only something shaped like it",
+        'const ts = { factory: { createIdentifier: (text: string) => ({ text }) }, version: "5.9.3" };',
+      ],
+    ),
+  ],
+  "tests/sandbox_worker.ts": [
+    ...ways(
+      '    await Deno.writeTextFile(e.data.path, "a macro wrote this");',
+      [
+        "the probe never writes, so the write denial is asserted against nothing",
+        "    /* kept */;",
+      ],
+    ),
+  ],
   "src/spans.ts": [
     // `spanning`, `identity`, `sourceOffset` and `outputOffsets` had no mutations at
     // all, which is four of seven exports and includes the constructor every other
@@ -430,7 +473,11 @@ if (plan === undefined) throw new Error(`no mutations listed for ${target}`);
 
 const run = async (): Promise<number> =>
   (await new Deno.Command(Deno.execPath(), {
-    args: ["test", "-A", "--quiet", ...suite],
+    // `--unstable-worker-options` is what lets a worker be spawned with a
+    // permission set at all, and the sandbox suite is nothing without it. It is
+    // on the package's own test task for the same reason, so a run here that
+    // omitted it would report a red baseline rather than a result.
+    args: ["test", "-A", "--quiet", "--unstable-worker-options", ...suite],
     stdout: "null",
     stderr: "null",
   }).output()).code;

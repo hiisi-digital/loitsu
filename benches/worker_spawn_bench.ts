@@ -53,7 +53,7 @@ function open(
 ): {
   worker: Worker;
   ask: (name: string) => Promise<string>;
-  close: () => void;
+  terminate: () => void;
 } {
   // The permissions are the enforcement, and they are stated rather than
   // inherited. Read is granted because a worker has to load its own modules, and
@@ -88,7 +88,11 @@ function open(
         waiting.set(id, { resolve });
         worker.postMessage({ id, name });
       }),
-    close: () => worker.terminate(),
+    /** Named for what it is. `terminate` returns as soon as it has asked, and the
+     * isolate is torn down after that, so an arm that terminates in a loop has
+     * teardowns overlapping its own next spawn. That inflates the per-expansion
+     * arm in particular, and there is no synchronous way to wait it out. */
+    terminate: () => worker.terminate(),
   };
 }
 
@@ -118,7 +122,7 @@ for (const n of PER_FILE) {
       for (const name of names) {
         const w = open();
         await w.ask(name);
-        w.close();
+        w.terminate();
       }
     },
   });
@@ -131,7 +135,7 @@ for (const n of PER_FILE) {
       // macros in one file can see each other's leftovers; two files cannot.
       const w = open();
       await Promise.all(names.map((name) => w.ask(name)));
-      w.close();
+      w.terminate();
     },
   });
 
@@ -143,7 +147,7 @@ for (const n of PER_FILE) {
       // build a node. The arm above it is the floor; this one is the price.
       const w = open(WORKER_REAL);
       await Promise.all(names.map((name) => w.ask(name)));
-      w.close();
+      w.terminate();
     },
   });
 
@@ -175,6 +179,6 @@ const pooled = open();
 const pool = [open(), open(), open(), open()];
 
 globalThis.addEventListener("unload", () => {
-  pooled.close();
-  for (const w of pool) w.close();
+  pooled.terminate();
+  for (const w of pool) w.terminate();
 });
