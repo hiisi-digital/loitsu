@@ -17,7 +17,12 @@
  * upstream should fail here rather than in somebody's threat model.
  */
 import ts from "typescript";
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertNotEquals,
+  assertStringIncludes,
+} from "@std/assert";
 
 const WORKER = import.meta.resolve("./sandbox_worker.ts");
 
@@ -82,6 +87,44 @@ Deno.test("a worker denied write cannot write, and one granted it can", async ()
   }
 });
 
+Deno.test("a worker denied run cannot start a process, and one granted it can", async () => {
+  // Write is the denial the enforcement option is usually argued over, but a macro
+  // that cannot write and can spawn has not been contained. So run is pinned too,
+  // and by the same shape: the granted case first, so the denial means something.
+  // What comes back is what the child printed: the word supplied here, so an
+  // answer that is a constant dies on the second call, and the child's own process
+  // id, so an answer that merely echoes the word cannot produce one at all.
+  const granted = await under(RUN_WORKER, { read: true, run: true }, {
+    word: "a-process-ran",
+  });
+  const again = await under(RUN_WORKER, { read: true, run: true }, {
+    word: "and-another-one",
+  });
+  const child = (said: string): string => said.split(" ").at(-1) ?? "";
+
+  assert(
+    granted.said!.startsWith("a-process-ran "),
+    `expected the word back, got ${granted.said}`,
+  );
+  assert(again.said!.startsWith("and-another-one "));
+  assertNotEquals(child(granted.said!), granted.mine, "a separate process ran");
+  assertNotEquals(
+    child(granted.said!),
+    child(again.said!),
+    "and a fresh one each time",
+  );
+
+  const denied = await under(RUN_WORKER, { read: true, run: false }, {
+    word: "a-process-ran",
+  });
+  assertEquals(denied.said, "", "the denial held and nothing was printed");
+  assertEquals(
+    denied.why,
+    "NotCapable",
+    "and it held because of the permission, not because the command was bad",
+  );
+});
+
 Deno.test("the parent's own grant does not reach the worker", async () => {
   // The test process holds write on the temp directory, and the worker is denied.
   // If a worker inherited the parent's permissions the denial would be decorative,
@@ -99,6 +142,7 @@ Deno.test("the parent's own grant does not reach the worker", async () => {
 const READ_WORKER = import.meta.resolve("./sandbox_read_worker.ts");
 const ENV_WORKER = import.meta.resolve("./sandbox_env_worker.ts");
 const ESCALATE_WORKER = import.meta.resolve("./sandbox_escalate_worker.ts");
+const RUN_WORKER = import.meta.resolve("./sandbox_run_worker.ts");
 
 /** Spawns a worker under one permission set and reports the first thing that
  * comes back, whether that is a message or the module failing to evaluate.
@@ -182,9 +226,11 @@ Deno.test("env cannot be denied to a macro that imports the compiler", async () 
   // finishes evaluating and the failure arrives at the parent's `onerror`, before
   // any message is exchanged.
   //
-  // So an enforced macro that builds nodes holds env from the start, and what
-  // enforcement can actually take away is write, net, run and ffi. Read too, per
-  // the test above.
+  // So an enforced macro that builds nodes holds env from the start. What
+  // enforcement is measured here to take away is read, write and run. Net and ffi
+  // are denied in the same set and are not pinned: granting either to a worker
+  // needs the parent to hold it, and this suite deliberately holds neither, so a
+  // test written here would report on the command line rather than the platform.
   const refused = await under(ENV_WORKER, { read: true, env: false }, {});
   assert(
     refused.evaluation !== undefined,

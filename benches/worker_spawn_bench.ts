@@ -56,10 +56,12 @@ function open(
   terminate: () => void;
 } {
   // The permissions are the enforcement, and they are stated rather than
-  // inherited. Read is granted because a worker has to load its own modules, and
-  // env because `typescript` reads `process.env.TSC_WATCHFILE` while it is being
-  // imported and fails the spawn outright without it. Write, net, run and ffi are
-  // denied, which is the part that makes this different from trusting the macro.
+  // inherited. Env has to be granted: `typescript` reads `TSC_WATCHFILE` while it
+  // is being imported and the isolate fails outright without it. Read is granted
+  // here so the arms measure the same isolate a real expansion would run in, not
+  // because it is forced; `tests/sandbox_test.ts` shows an isolate denied read
+  // still loading the compiler and printing through it. Write, net, run and ffi
+  // are denied, which is the part that makes this different from trusting a macro.
   const worker = new Worker(url, {
     type: "module",
     deno: {

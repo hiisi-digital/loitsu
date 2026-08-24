@@ -102,6 +102,33 @@ const PLANS: Record<string, readonly Mutation[]> = {
       ],
     ),
   ],
+  "tests/sandbox_run_worker.ts": [
+    ...ways(
+      "    }).output();",
+      [
+        "the probe never waits for the process, so a refused spawn and a finished\n      // one report the same thing",
+        "    });",
+      ],
+    ),
+    ...ways(
+      '      args: ["eval", `console.log(${JSON.stringify(e.data.word)}, Deno.pid)`],',
+      [
+        "the child prints a constant, so the answer no longer depends on a process\n      // having been given anything to say",
+        '      args: ["eval", `console.log("a-process-ran", 1)`],',
+      ],
+      [
+        "the child no longer says which process it was, so an echo of the word\n      // would pass for having run one",
+        '      args: ["eval", `console.log(${JSON.stringify(e.data.word)})`],',
+      ],
+    ),
+    ...ways(
+      "      said: new TextDecoder().decode(stdout).trim(),",
+      [
+        "the probe answers with what it was asked rather than with what ran",
+        "      said: `${e.data.word} ${Deno.pid}`,",
+      ],
+    ),
+  ],
   "tests/sandbox_worker.ts": [
     ...ways(
       '    await Deno.writeTextFile(e.data.path, "a macro wrote this");',
