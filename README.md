@@ -125,9 +125,10 @@ verify on the way back in it throws away rather than trusts.
 
 ## Keeping twins current
 
-`Twins` is the only thing in here that ever reads your source. Everything else
-sees twins, which is the point: a checker or a language server gets handed a
-file it can actually parse, and never the one you're editing.
+`Twins` is the only thing in here that ever reads the source files. Everything
+else sees twins, which is the point of the whole arrangement. A checker or a
+language server is handed a file it can actually parse, never the one being
+edited.
 
 ```ts
 import { Twins, watch } from "@hiisi/loitsu";
@@ -147,36 +148,36 @@ stop.abort();
 await watching; // it resolves once the watch has actually let go
 ```
 
-The rule it holds to is that a twin is never older than the last change it
+The rule it holds to: a twin is never older than the last change it
 acknowledged. Editors write a file several times per save, so two rebuilds for
-one path overlap all the time, and whichever finishes last is not necessarily
-the one that read the newest bytes. A rebuild that's been overtaken throws its
-own result away instead of storing it.
+one path overlap fairly often, and the one that finishes last did not
+necessarily read the newest bytes. A rebuild that has been overtaken throws its
+own result away rather than storing it.
 
-Events are batched, so one save is one rebuild and not five. A batch waits
-`settleMs` for the writing to stop, and `maxWaitMs` is the longest it may be
-held open however many events keep arriving, which is what gets you fresh twins
-in the middle of a formatter walking your whole tree instead of at the end of
+Events are batched, so one save is one rebuild instead of five. A batch waits
+`settleMs` for the writing to settle, and `maxWaitMs` caps how long it may be
+held open however many events keep arriving. That cap is what keeps twins
+arriving during a formatter walking a whole tree, rather than only at the end of
 it.
 
-A file that can't be read is an ordinary thing halfway through a save, so it is
-reported rather than thrown: `get` and `peek` give you nothing and `failure`
-tells you why.
+A file that cannot be read is ordinary halfway through a save, so it is reported
+rather than thrown. `get` and `peek` answer with nothing and `failure` says
+why.
 
 ```ts
 twins.failure("src/thing.ts")?.why; // "NotFound" while the editor is mid-write
 ```
 
-`interesting` is what decides which paths are worth expanding, and it is the
-default. It takes the TypeScript sources and leaves the declaration files, since
-a `.d.ts` has no bodies for a macro to be in. Pass your own as `matches` if you
-want something else.
+`interesting` is the default for deciding which paths are worth expanding. It
+takes the TypeScript sources and leaves the declaration files, since a `.d.ts`
+has no bodies for a macro to sit in. Do note that `matches` takes a predicate of
+its own if that default does not suit.
 
 ## What gets left alone
 
-A name that isn't in the registry is left exactly as written. So if you do
-happen to have an array literal standing alone as a statement, you get your code
-back untouched rather than an error about a macro you never wrote.
+A name that is not in the registry is left exactly as written. An array literal
+standing alone as a statement comes back untouched, rather than as an error
+about a macro nobody wrote.
 
 The one thing that is reported rather than ignored is an attribute as the last
 statement in a block, since it has nothing beneath it to attach to. That is
