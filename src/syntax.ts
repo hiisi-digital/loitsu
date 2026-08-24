@@ -99,6 +99,20 @@ function asAttributeCall(s: ts.Statement): ts.CallExpression | undefined {
   return only !== undefined && ts.isCallExpression(only) ? only : undefined;
 }
 
+/** Which TypeScript dialect a file is written in.
+ *
+ * `.tsx` is not a variant spelling of `.ts`. The two disagree about what `<` means
+ * at the head of an expression, so a file parsed in the wrong one does not fail: it
+ * parses as something else entirely, and a JSX element comes apart into comparisons.
+ */
+export type Dialect = "ts" | "tsx";
+
+/** The dialect a file name implies. Anything that is not `.tsx` is `ts`, which is
+ * what the compiler itself assumes for an unknown extension. */
+export function dialectOf(fileName: string): Dialect {
+  return fileName.endsWith(".tsx") ? "tsx" : "ts";
+}
+
 /**
  * Every macro invocation in `text`, in source order.
  *

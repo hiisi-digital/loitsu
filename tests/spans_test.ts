@@ -12,13 +12,8 @@
  */
 
 import { assertEquals, assertThrows } from "@std/assert";
-import { identity, type Span, sourceOffset, spanning } from "../src/spans.ts";
-
-const span = (outStart: number, length: number, inStart: number): Span => ({
-  outStart,
-  length,
-  inStart,
-});
+import { identity, sourceOffset, type Span, spanning } from "../src/spans.ts";
+import { span } from "./spans_helpers.ts";
 
 // ---------------------------------------------------------------- construction
 
@@ -115,7 +110,11 @@ Deno.test("undefined for a gap is a real answer, not a failure", () => {
   // the nearest line would be a guess wearing a citation.
   const t = spanning([span(0, 5, 0), span(20, 5, 5)]);
   for (let i = 5; i < 20; i++) {
-    assertEquals(sourceOffset(t, i), undefined, `offset ${i} came from nowhere`);
+    assertEquals(
+      sourceOffset(t, i),
+      undefined,
+      `offset ${i} came from nowhere`,
+    );
   }
 });
 
@@ -161,4 +160,51 @@ Deno.test("the harness can fail, so the laws above mean something", () => {
   const t = spanning([span(0, 5, 100)]);
   assertEquals(sourceOffset(t, 0), 100);
   assertThrows(() => spanning([span(0, 10, 0), span(1, 10, 0)]), RangeError);
+});
+
+Deno.test("a span whose fields are not integers is refused, not quietly believed", () => {
+  // `cache.ts` rebuilds a stored table through `spanning` and calls that the thing
+  // that makes a stored entry no more trusted than any other input. That claim is
+  // only worth what the constructor actually refuses, and a cache entry is plain
+  // JSON somebody can edit: `"outStart": "0"` survives `JSON.parse` intact.
+  //
+  // Left unguarded, every comparison in here short-circuits on a non-number and the
+  // table is accepted. `sourceOffset` is declared `number | undefined` and returned
+  // the string "03", by concatenation, which is a lie in the return type as well as
+  // in the answer.
+  for (
+    const [what, spans] of [
+      ["no fields at all", [{}]],
+      ["two empty objects", [{}, {}]],
+      ["string fields", [{ outStart: "0", length: "4", inStart: "0" }]],
+      ["a string outStart", [{ outStart: "0", length: 4, inStart: 0 }]],
+      ["a string length", [{ outStart: 0, length: "4", inStart: 0 }]],
+      ["a string inStart", [{ outStart: 0, length: 4, inStart: "10" }]],
+      ["null fields", [{ outStart: null, length: null, inStart: null }]],
+      ["undefined fields", [{
+        outStart: undefined,
+        length: undefined,
+        inStart: undefined,
+      }]],
+      ["NaN", [{ outStart: NaN, length: 4, inStart: 0 }]],
+      ["Infinity", [{ outStart: 0, length: Infinity, inStart: 0 }]],
+      ["a fractional offset", [{ outStart: 0.5, length: 4, inStart: 0 }]],
+      ["a fractional length", [{ outStart: 0, length: 4.5, inStart: 0 }]],
+    ] as const
+  ) {
+    assertThrows(
+      () => spanning(spans as never),
+      RangeError,
+      undefined,
+      what,
+    );
+  }
+});
+
+Deno.test("and the control: a sound table of the same shape is still accepted", () => {
+  // Without this, a `spanning` that refused everything would pass the test above.
+  const table = spanning([{ outStart: 0, length: 4, inStart: 10 }]);
+  assertEquals(table.spans.length, 1);
+  assertEquals(sourceOffset(table, 3), 13);
+  assertEquals(typeof sourceOffset(table, 3), "number");
 });

@@ -37,7 +37,31 @@ export type {
   DanglingAttribute,
   Use,
 } from "./src/syntax.ts";
-export { offsetIn, uses } from "./src/syntax.ts";
+export type { Dialect } from "./src/syntax.ts";
+export { dialectOf, offsetIn, uses } from "./src/syntax.ts";
 
-export type { Span, SpanTable } from "./src/spans.ts";
-export { identity, sourceOffset, spanning } from "./src/spans.ts";
+export type { Run, Span, SpanTable } from "./src/spans.ts";
+export {
+  compose,
+  identity,
+  outputOffsets,
+  outputRuns,
+  sourceOffset,
+  sourceRuns,
+  spanning,
+} from "./src/spans.ts";
+
+export type { Found, Marked } from "./src/sentinel.ts";
+export { Marker, strip } from "./src/sentinel.ts";
+
+export type { Diagnostic, Expanded, ExpandOptions } from "./src/expand.ts";
+export { expand, ROUNDS } from "./src/expand.ts";
+
+export type { Cached } from "./src/cache.ts";
+export {
+  cached,
+  cacheHome,
+  defaultHome,
+  keyOf,
+  VERSION as CACHE_VERSION,
+} from "./src/cache.ts";
