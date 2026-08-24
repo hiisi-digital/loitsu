@@ -9,9 +9,10 @@
   },
   "tasks": {
     "check": "deno check mod.ts",
-    "test": "deno test --allow-read --allow-env --allow-sys --allow-write=$TMPDIR,/tmp,/private/tmp,/var/folders,/private/var/folders",
+    "test": "deno test --allow-read --allow-env --allow-sys --allow-run --unstable-worker-options --allow-write=$TMPDIR,/tmp,/private/tmp,/var/folders,/private/var/folders",
     "lint": "deno run -A gate.ts",
-    "mutate": "deno run -A tools/mutate.ts"
+    "mutate": "deno run -A tools/mutate.ts",
+    "bench": "deno bench --allow-read --allow-env --unstable-worker-options benches/"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@^1.0.14",
