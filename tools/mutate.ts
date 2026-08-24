@@ -17,6 +17,12 @@
  * because it once was not: a crash mid-run left a mutant on disk, and the next
  * hour was spent debugging a bug that had been introduced deliberately.
  *
+ * A mutation is a real edit to a real file for as long as the suite runs against
+ * it, so anything else reading that file meanwhile reads the mutant. A second
+ * mutation run is refused outright by the lock below. An ordinary `deno task test`
+ * is not, and running one during a sweep produces failures that belong to a
+ * mutation rather than to the tree.
+ *
  * Run: `deno run -A tools/mutate.ts src/expand.ts tests/expand_test.ts`
  * with the mutations for that file listed in `PLANS` below.
  */
@@ -44,6 +50,12 @@ const NEVER_AT = `    ${NEVER}`;
  * takes: one that returns from the method and one that skips a loop iteration. */
 const NEVER_RETURN = "    if (false) return;";
 const NEVER_CONTINUE = "    if (false) continue;";
+/** The same two shapes at the indentation a nested block sits at. */
+const NEVER_CONTINUE_IN = "        if (false) continue;";
+const NEVER_IN = "    if (false) {";
+/** A statement removed by replacing it with one that does nothing, which is how a
+ * step whose absence has to be noticed downstream is tested. */
+const DOES_NOTHING = "  void 0;";
 
 /** Where an attribute's replacement stops. Named because two mutations move it, and
  * one of them is the other's line with the attribute's own start put back. */
@@ -135,6 +147,344 @@ const PLANS: Record<string, readonly Mutation[]> = {
       [
         "the probe never writes, so the write denial is asserted against nothing",
         "    /* kept */;",
+      ],
+    ),
+  ],
+  "tests/readme_test.ts": [
+    ...ways(
+      '      if (!line.startsWith("import ")) {',
+      [
+        "an import line is checked as a statement, so the merged program repeats\n      // every import and cannot compile at all",
+        "      if (true) {",
+      ],
+    ),
+    ...ways(
+      "        bodies.push(line);",
+      [
+        "the statements a block was written to show are dropped, leaving imports\n      // that check trivially",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "      assert(plain !== null, `readme import not understood: ${line}`);",
+      [
+        "an import shape the merge cannot read is dropped rather than reported",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    assert(known.has(tag), `unknown fence language in the readme: ${tag}`);",
+      [
+        "a misspelled fence language passes, so a block nobody checks reads as one\n      // that was checked",
+        DOES_NOTHING,
+      ],
+    ),
+  ],
+  "src/translate.ts": [
+    ...ways(
+      "  return { start, length: end - start };",
+      [
+        "a range's length is measured backwards",
+        "  return { start, length: start - end };",
+      ],
+      [
+        "a range's length is its end, so every range starts from the same place",
+        "  return { start, length: end };",
+      ],
+    ),
+    ...ways(
+      "    return outputOffsets(this.#pair.spans, offset)",
+      [
+        "an authored position answers with only its first image, so a rename\n      // driven off it reaches one arm and silently leaves the others",
+        "    return outputOffsets(this.#pair.spans, offset).slice(0, 1)",
+      ],
+    ),
+    ...ways(
+      "    return back === undefined",
+      [
+        "a twin position with no authored image is answered with one anyway",
+        "    return false",
+      ],
+    ),
+    ...ways(
+      "  if (here === undefined) return undefined;",
+      [
+        "a diagnostic on text nobody wrote is reported rather than dropped",
+        "  if (here === undefined) return diagnostic;",
+      ],
+    ),
+    ...ways(
+      "  for (const rest of ranges.slice(1)) {",
+      [
+        "the authored range a diagnostic sits on is also noted beside itself",
+        "  for (const rest of ranges.slice(0)) {",
+      ],
+      [
+        "a diagnostic covering two authored regions mentions only the first",
+        "  for (const rest of []) {",
+      ],
+    ),
+    ...ways(
+      "    if (one.location.uri !== uri) {",
+      [
+        "a related location in another file is moved through this document's table",
+        NEVER_IN,
+      ],
+      [
+        "a related location in this document is passed through unmoved",
+        "    if (true) {",
+      ],
+    ),
+    ...ways(
+      "    if (moved === undefined) continue;",
+      [
+        "a related location with no authored image is kept, pointing nowhere",
+        NEVER_CONTINUE,
+      ],
+    ),
+    ...ways(
+      "  if (related.length > 0) return { ...out, relatedInformation: related };",
+      [
+        "a diagnostic that had no related information leaves carrying an empty list",
+        "  if (true) return { ...out, relatedInformation: related };",
+      ],
+    ),
+    ...ways(
+      "  delete (out as { relatedInformation?: unknown }).relatedInformation;",
+      [
+        "the incoming related information survives unmapped when all of it was dropped",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "      if (ranges.length === 0) dropped++;",
+      [
+        "an edit naming only invented text is dropped without being counted",
+        "      if (false) dropped++;",
+      ],
+    ),
+    ...ways(
+      "        if (seen.has(key)) continue;",
+      [
+        "the same authored range from two twins becomes two edits of one place",
+        NEVER_CONTINUE_IN,
+      ],
+    ),
+    ...ways(
+      "          newText: wrote === authored ? edit.newText : newName,",
+      [
+        "the twin's replacement is spliced onto the authored range whatever it\n      // was computed against, so a derived name's affix lands on the source",
+        "          newText: edit.newText,",
+      ],
+      [
+        "the affix a shorthand property needs is dropped, leaving `{ bar }`\n      // where `{ foo: bar }` was meant",
+        "          newText: newName,",
+      ],
+    ),
+    ...ways(
+      "    if (run.length === 0) {",
+      [
+        "a point is crossed as a run, so every zero-length diagnostic is dropped",
+        NEVER_IN,
+      ],
+      [
+        "a backwards range is crossed as a point at its start rather than as nothing",
+        "    if (run.length <= 0) {",
+      ],
+    ),
+    ...ways(
+      "  edits.sort((a, b) => comparePositions(a.range.start, b.range.start));",
+      [
+        "edits come back in the order the twins were asked, not in authored order",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    if (comparePositions(next.start, last.end) < 0) {",
+      [
+        "overlapping edits are handed to the client rather than refused",
+        NEVER_IN,
+      ],
+      [
+        "edits that merely touch are refused, which is the common case",
+        "    if (comparePositions(next.start, last.end) <= 0) {",
+      ],
+      [
+        "the comparison is against the previous start, so nesting is not seen",
+        "    if (comparePositions(next.start, last.start) < 0) {",
+      ],
+    ),
+    // Two mutations were written here and both were equivalent, because the
+    // comparison they broke had clauses no input could reach: two edits sharing a
+    // start overlap and are refused before anything can be distinguished by where
+    // they end. The answer was to delete the unreachable clauses rather than to
+    // hunt for a test, so the comparison is now over positions and the dedupe is
+    // over a key. What is left is reachable and is mutated below.
+    ...ways(
+      "  return a.line - b.line || a.character - b.character;",
+      [
+        "two positions on different lines compare as one position",
+        "  return a.character - b.character;",
+      ],
+    ),
+    ...ways(
+      "    `${range.end.line}:${range.end.character}`;",
+      [
+        "two edits starting in one place are the same however far each reaches",
+        "    ``;",
+      ],
+    ),
+  ],
+  "src/position.ts": [
+    ...ways(
+      "      if (ch === 0x0a) starts.push(at + 1);",
+      [
+        "a newline stops opening a line, so the whole text is one line",
+        "      if (false) starts.push(at + 1);",
+      ],
+    ),
+    ...ways(
+      "      else if (ch === 0x0d) {",
+      [
+        "a lone carriage return stops ending a line",
+        "      else if (false) {",
+      ],
+    ),
+    ...ways(
+      "        if (text.charCodeAt(at + 1) === 0x0a) at++;",
+      [
+        "a carriage return and newline becomes two lines instead of one",
+        "        if (false) at++;",
+      ],
+      [
+        "the pair is consumed even when the newline is not there",
+        "        at++;",
+      ],
+    ),
+    ...ways(
+      "      this.#text.charCodeAt(at - 1) === 0x0d",
+      [
+        "a line's content is measured as including its carriage return",
+        "      false",
+      ],
+    ),
+    ...ways(
+      "    const line = Math.min(Math.max(Math.trunc(at.line), 0), this.count - 1);",
+      [
+        "a line past the end is not clamped, so the lookup is undefined",
+        "    const line = Math.max(Math.trunc(at.line), 0);",
+      ],
+      [
+        "a negative line is not clamped",
+        "    const line = Math.min(Math.trunc(at.line), this.count - 1);",
+      ],
+      [
+        "the last line is one short, so the last line is unreachable",
+        "    const line = Math.min(Math.max(Math.trunc(at.line), 0), this.count - 2);",
+      ],
+    ),
+    ...ways(
+      "    const want = Math.max(Math.trunc(at.character), 0);",
+      [
+        "a negative character is not clamped to the start of the line",
+        "    const want = Math.trunc(at.character);",
+      ],
+    ),
+    ...ways(
+      '    if (encoding === "utf-16") return Math.min(from + want, to);',
+      [
+        "a character past the end of its line runs into the next one",
+        '    if (encoding === "utf-16") return from + want;',
+      ],
+      [
+        "utf-16 takes the counting path, which counts a pair as one unit",
+        "    if (false) return Math.min(from + want, to);",
+      ],
+    ),
+    ...ways(
+      "      if (counted + cost > want) return scan;",
+      [
+        "a column exactly on a boundary lands before it rather than on it",
+        "      if (counted + cost >= want) return scan;",
+      ],
+      [
+        "a wide character is entered rather than stopped before",
+        "      if (counted > want) return scan;",
+      ],
+    ),
+    ...ways(
+      "  if (code < 0x80) return 1;",
+      ["ascii is counted as two bytes", "  if (code < 0x80) return 2;"],
+      [
+        "the one byte range runs too far, so two byte characters count as one",
+        "  if (code < 0x100) return 1;",
+      ],
+    ),
+    ...ways(
+      "  if (code < 0x800) return 2;",
+      [
+        "the two byte range runs too far, so three byte characters count as two",
+        "  if (code < 0x1000) return 2;",
+      ],
+    ),
+    ...ways(
+      "  if (code < 0x10000) return 3;",
+      [
+        "a character outside the basic plane is counted as three bytes",
+        "  if (code < 0x110000) return 3;",
+      ],
+    ),
+    ...ways(
+      "      if (this.#starts[mid]! <= want) lo = mid;",
+      [
+        "the search excludes a line's own first offset, landing on the one before",
+        "      if (this.#starts[mid]! < want) lo = mid;",
+      ],
+    ),
+    ...ways(
+      "    const to = Math.min(want, this.endOf(lo));",
+      [
+        "an offset inside a carriage return and newline names the gap",
+        "    const to = want;",
+      ],
+    ),
+    ...ways(
+      "      if (wide && scan + 2 > to) break; // the offset splits a pair",
+      [
+        "an offset splitting a surrogate pair counts the whole pair",
+        "      if (false) break;",
+      ],
+    ),
+    ...ways(
+      "      const wide = code > 0xffff;",
+      [
+        "the last character of the basic plane is read as a surrogate pair",
+        "      const wide = code >= 0xffff;",
+      ],
+    ),
+    ...ways(
+      '      counted += encoding === "utf-8" ? utf8Width(code) : 1;',
+      [
+        "utf-32 counts bytes and utf-8 counts code points, the two swapped",
+        '      counted += encoding === "utf-8" ? 1 : utf8Width(code);',
+      ],
+    ),
+    ...ways(
+      '    if (one === "utf-8" || one === "utf-16" || one === "utf-32") return one;',
+      [
+        "an unrecognised encoding is accepted rather than skipped",
+        "    return one as Encoding;",
+      ],
+      [
+        "utf-8 is not recognised, so a client asking for it is answered in utf-16",
+        '    if (one === "utf-16" || one === "utf-32") return one;',
+      ],
+    ),
+    ...ways(
+      "  return DEFAULT_ENCODING;",
+      [
+        "a client offering nothing usable is answered in an encoding it may not have",
+        '  return "utf-8";',
       ],
     ),
   ],
@@ -653,6 +1003,25 @@ if (await run() !== 0) {
   Deno.exit(2);
 }
 
+/** Held for the length of a run, so two of them cannot mutate at once.
+ *
+ * `createNew` is the whole mechanism: it fails when the file is there, which makes
+ * taking the lock and finding it taken one operation with no window between them.
+ *
+ * `MUTATE_LOCK` moves it, which is how the suite exercises the refusal without
+ * being granted write over the repository it is testing. */
+const LOCK = Deno.env.get("MUTATE_LOCK") ?? ".mutate.lock";
+try {
+  await Deno.writeTextFile(LOCK, `${Deno.pid}\n`, { createNew: true });
+} catch (err) {
+  if (!(err instanceof Deno.errors.AlreadyExists)) throw err;
+  console.error(
+    `${LOCK} is held, so a mutation run is already editing the tree. Wait for it,`,
+  );
+  console.error("or delete the lock if nothing is running.");
+  Deno.exit(3);
+}
+
 const original = await Deno.readTextFile(target);
 const survived: string[] = [];
 try {
@@ -670,6 +1039,7 @@ try {
   }
 } finally {
   await Deno.writeTextFile(target, original);
+  await Deno.remove(LOCK);
 }
 
 console.log(`\n${survived.length} survived of ${plan.length}`);

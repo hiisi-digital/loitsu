@@ -56,16 +56,18 @@ deno add jsr:@hiisi/loitsu
 
 Here's the basic flow, and how the pieces fit together. A macro says what it
 expands into, `expand` runs them all and hands back a twin of your file, and the
-span table it comes with says which byte of the twin came from where.
+span table it comes with says which part of the twin came from where.
 
 ```ts
 import { cached, expand, registry, sourceRuns, uses } from "@hiisi/loitsu";
 import type { AttributeMacro, FunctionMacro } from "@hiisi/loitsu";
-import ts from "npm:typescript";
+import ts from "npm:typescript@^5.9.2"; // the version loitsu builds against
 
 // arguments arrive as expressions, because that's what the parser made of them.
-// `cfg(deno)` gives you an identifier and `cfg("deno")` a string literal, and both
-// spellings parse, so it's the macro that decides which of them it wants to accept.
+// `cfg(deno)` gives an identifier and `cfg("deno")` a string literal, and both
+// spellings parse, so the macro decides which of them it accepts. the tuple in the
+// type is the macro's own, and it is not erased: declare it and the arguments are
+// typed at the point of use rather than left as `unknown`.
 const word = (arg: ts.Expression): string =>
   ts.isIdentifier(arg) ? arg.text : ts.isStringLiteral(arg) ? arg.text : "";
 
@@ -73,18 +75,18 @@ const word = (arg: ts.Expression): string =>
 // returning nothing is a real answer, and it's the one `cfg` gives when its
 // predicate doesn't hold: the item never gets emitted, rather than emitted and then
 // stripped again later.
-const cfg: AttributeMacro = {
+const cfg: AttributeMacro<readonly [ts.Expression]> = {
   kind: "attribute",
   name: "cfg",
-  expand: (args, item) => word(args[0]!) === "deno" ? [item.node] : [],
+  expand: (args, item) => word(args[0]) === "deno" ? [item.node] : [],
 };
 
 // a function macro returns the expression that replaces the call.
-const includeStr: FunctionMacro = {
+const includeStr: FunctionMacro<readonly [ts.Expression]> = {
   kind: "function",
   name: "include_str",
   expand: (args) =>
-    ts.factory.createStringLiteral(Deno.readTextFileSync(word(args[0]!))),
+    ts.factory.createStringLiteral(Deno.readTextFileSync(word(args[0]))),
 };
 
 const known = registry([cfg, includeStr]);
@@ -101,8 +103,8 @@ for (const use of uses(source, known)) {
 // jsx comes apart into comparisons.
 const twin = expand(source, known, { fileName: "src/thing.ts" });
 
-// and back again. the checker complains about a byte of the twin, and this says
-// which bytes of what you actually wrote it was complaining about.
+// and back again. the checker complains about a place in the twin, and this
+// says which authored text it was complaining about.
 const at = twin.code.indexOf("readConfig");
 sourceRuns(twin.spans, { start: at, length: 10 });
 ```
@@ -115,8 +117,9 @@ under your cache directory, keyed on the file's bytes and on what it was
 expanded against:
 
 ```ts
-const twin = await cached(source, "my-macros@1", known, dir, "src/thing.ts");
-twin.hit; // false the first time, true after
+const dir = Deno.makeTempDirSync(); // wherever the cache should live
+const reused = await cached(source, "my-macros@1", known, dir, "src/thing.ts");
+reused.hit; // false the first time, true after
 ```
 
 Nothing there is authoritative and none of it is meant to be committed. Losing
@@ -161,8 +164,7 @@ arriving during a formatter walking a whole tree, rather than only at the end of
 it.
 
 A file that cannot be read is ordinary halfway through a save, so it is reported
-rather than thrown. `get` and `peek` answer with nothing and `failure` says
-why.
+rather than thrown. `get` and `peek` answer with nothing and `failure` says why.
 
 ```ts
 twins.failure("src/thing.ts")?.why; // "NotFound" while the editor is mid-write
@@ -196,8 +198,10 @@ with room beside it.
 
 ## Source maps
 
-Expansion moves things around, so a span table says where each byte of the twin
-came from. Going forward is a function, one output byte from one source byte:
+Expansion moves things around, so a span table says where each offset in the
+twin came from. Offsets here are utf-16 code units, the same unit
+`String.length` and the language server protocol count in. Going forward is a
+function, one twin offset from one source offset:
 
 ```ts
 import { identity, sourceOffset, spanning } from "@hiisi/loitsu";
@@ -218,7 +222,7 @@ Ask for all of them:
 ```ts
 import { outputOffsets, outputRuns, sourceRuns } from "@hiisi/loitsu";
 
-outputOffsets(table, 125); // every image of that source byte, ascending
+outputOffsets(table, 125); // every image of that source offset, ascending
 outputRuns(table, { start: 120, length: 15 }); // the same, for a range
 sourceRuns(table, { start: 40, length: 15 }); // and the other direction
 ```
@@ -227,7 +231,7 @@ A reverse that gives you one answer would rename one of the arms and quietly
 miss the rest, which is the kind of bug you only notice much later.
 
 `compose` chains two tables, for when expansion runs a macro at a time and each
-round has its own map. A byte survives only where both tables carry it, so
+round has its own map. An offset survives only where both tables carry it, so
 something a macro generated has no source origin after composing, which is
 right: you didn't write it.
 
@@ -237,6 +241,64 @@ return when a pass did nothing rather than pretending it has no mapping at all.
 Offsets are branded and made with `offsetIn(text, at)`, which checks the offset
 is actually inside that text. Small thing, but offsets crossing between files is
 the bug you spend an afternoon on.
+
+## Positions and diagnostics
+
+A span table counts in offsets. Editors and language servers count in lines and
+characters, and disagree about what a character is: utf-16 code units by
+default, sometimes utf-8, occasionally codepoints. `Lines` holds one document
+and converts between the two, in whichever of the three a client asked for.
+
+```ts
+import { Lines, negotiate } from "@hiisi/loitsu";
+
+const encoding = negotiate(["utf-8", "utf-16"]); // "utf-8", the first supported
+const authored = new Lines(source);
+
+authored.positionAt(45, encoding); // { line, character }
+authored.offsetAt({ line: 2, character: 4 }, encoding);
+```
+
+`negotiate` takes what a client advertised and answers with the first entry both
+sides support, falling back to utf-16, which the protocol requires everyone to
+accept.
+
+`Mapping` pairs a source and a twin over one span table and moves positions and
+ranges across it. A source position can land in several places, so it answers
+with a list; a twin position lands in at most one, so it answers with one or
+with nothing.
+
+```ts
+import { Mapping, toSourceDiagnostic } from "@hiisi/loitsu";
+
+const map = new Mapping({ source, twin: twin.code, spans: twin.spans });
+
+const wrote = authored.positionAt(0, map.encoding);
+map.toTwin(wrote); // every image of an authored position
+map.toSource(map.twin.positionAt(at, map.encoding)); // and back, if it was written
+```
+
+`toSourceDiagnostic` moves one diagnostic onto the authored text, and answers
+with nothing when the range it covers has no authored image. That case is
+ordinary rather than a failure: an unused-variable complaint about an arm the
+twin carries and the target does not use belongs to text nobody wrote.
+`toSourceDiagnostics` does the same for a batch and keeps the ones that
+survived.
+
+A range covering several authored regions keeps the first and hangs the rest off
+as related information, so one complaint stays one complaint.
+
+`renameEdits` unions the renames from every twin onto the one source. Each twin
+is a separate document to the checker, so a rename reaches one per request, and
+the answers meet here. An edit whose twin text matches the authored text carries
+its replacement across, which is what keeps `{ foo }` renaming to `{ foo: bar }`
+rather than to `{ bar }`. An edit against a name a macro derived is written with
+the new name alone, since an affix computed against text nobody typed is not
+something to splice into their file.
+
+Overlapping edits are refused rather than emitted. The protocol forbids them in
+one array, and a client handed two would have no way to see where the conflict
+came from.
 
 ## Limitations
 
