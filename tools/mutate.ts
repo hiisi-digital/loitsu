@@ -303,6 +303,93 @@ const PLANS: Record<string, readonly Mutation[]> = {
       to: NEVER,
     },
   ],
+  "src/watch.ts": [
+    // There is deliberately no mutation of `<=` to `<` here. `changed` raises the
+    // generation before every rebuild and `get` rebuilds only for a path it has never
+    // seen, so two rebuilds of one path never carry the same generation. The two
+    // spellings are the same program, and a mutation that cannot change behaviour
+    // cannot be caught by any test. The guard is still held down, by the mutation
+    // below that removes it outright.
+    ...ways(
+      "    if (at <= (this.#built.get(path) ?? -1)) return;",
+      [
+        "the last rebuild to finish wins, whatever generation it saw",
+        NEVER_RETURN,
+      ],
+      [
+        "only the first rebuild of a path ever stores",
+        "    if (this.#built.has(path)) return;",
+      ],
+    ),
+    {
+      what: "a rebuild in flight for a forgotten path resurrects it",
+      from: "    if (!this.#seen.has(path)) return;",
+      to: NEVER_RETURN,
+    },
+    {
+      what: "a change does not raise the generation, so nothing overtakes",
+      from: "    this.#seen.set(path, (this.#seen.get(path) ?? 0) + 1);",
+      to: "    this.#seen.set(path, this.#seen.get(path) ?? 0);",
+    },
+    {
+      what: "get rebuilds a path it already holds a twin for",
+      from: "    if (!this.#seen.has(path)) {",
+      to: "    if (true) {",
+    },
+    {
+      what: "an unreadable file keeps whatever twin it had",
+      from:
+        "      this.#store(path, at, undefined, (err as Error).constructor.name);",
+      to: "      return;",
+    },
+    {
+      what: "a rebuilt twin does not clear the failure before it",
+      from: "      this.#failed.delete(path);",
+      to: "      /* kept */;",
+    },
+    {
+      what: "forget leaves the generation behind",
+      from: "    this.#seen.delete(path);",
+      to: "    /* kept */;",
+    },
+    {
+      what: "the path never reaches the cache, so tsx is expanded as ts",
+      from: `      path,${CALL_END}`,
+      to: `      undefined,${CALL_END}`,
+    },
+    ...ways(
+      '  return (path.endsWith(".ts") || path.endsWith(".tsx")) &&\n    !path.endsWith(".d.ts");',
+      [
+        "declaration files are expanded too",
+        '  return path.endsWith(".ts") || path.endsWith(".tsx");',
+      ],
+      [
+        "tsx files are ignored",
+        '  return path.endsWith(".ts") && !path.endsWith(".d.ts");',
+      ],
+      ["everything is interesting", "  return true;"],
+    ),
+    {
+      what: "a deleted file keeps its twin instead of being forgotten",
+      from: "      else options.twins.forget(path);",
+      to: "      else { /* kept */ }",
+    },
+    {
+      what: "a removed file is rebuilt rather than forgotten",
+      from: "      if (await exists(path)) await options.twins.changed(path);",
+      to: "      if (true) await options.twins.changed(path);",
+    },
+    {
+      what: "the filter is dropped, so every file is expanded",
+      from: "        if (matches(path)) pending.add(path);",
+      to: "        pending.add(path);",
+    },
+    {
+      what: "a batch collected at the moment of the abort is dropped",
+      from: "      await flush();",
+      to: "      /* dropped */;",
+    },
+  ],
   "src/cache.ts": [
     ...ways(
       '  const key = await keyOf(text, `${against}:${dialectOf(fileName ?? "")}`);',

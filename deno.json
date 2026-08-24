@@ -12,6 +12,7 @@
     "test": "deno test --allow-read --allow-env --allow-sys --allow-run --unstable-worker-options --allow-write=$TMPDIR,/tmp,/private/tmp,/var/folders,/private/var/folders",
     "lint": "deno run -A gate.ts",
     "mutate": "deno run -A tools/mutate.ts",
+    "mutate:all": "deno run -A tools/mutate_all.ts",
     "bench": "deno bench --allow-read --allow-env --unstable-worker-options benches/"
   },
   "imports": {
