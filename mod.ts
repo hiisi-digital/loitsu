@@ -52,3 +52,6 @@ export {
 
 export type { Found, Marked } from "./src/sentinel.ts";
 export { Marker, strip } from "./src/sentinel.ts";
+
+export type { Diagnostic, Expanded } from "./src/expand.ts";
+export { expand, ROUNDS } from "./src/expand.ts";

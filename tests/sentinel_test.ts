@@ -280,6 +280,25 @@ Deno.test("a pair enclosing only whitespace is a loss too", () => {
   assertEquals(lost, [0]);
 });
 
+Deno.test("a second close on a closed pair finds nothing, not the first one's start", () => {
+  // The open is forgotten once it is used. Without that, a stray second close reuses
+  // the start the first one consumed and reports a region that runs from where the
+  // pair began to wherever the stray landed, which is a plausible-looking span over
+  // text the node never covered.
+  const marker = new Marker("test");
+  marker.mark(f.createIdentifier("x"), 0, 1);
+  const printed = `${wrap(marker.open(0))}real${wrap(marker.close(0))}tail${
+    wrap(marker.close(0))
+  }`;
+  const { text, found } = strip(printed, marker);
+  assertEquals(text, "realtail");
+  assertEquals(
+    found,
+    [{ id: 0, outStart: 0, length: 4 }],
+    "one pair, one region",
+  );
+});
+
 Deno.test("one marker's loss does not take a sound neighbour with it", () => {
   // Every refusal above returns early, and an early return that skipped the rest of
   // the text would pass all of them while mapping nothing.
