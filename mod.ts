@@ -102,3 +102,6 @@ export { interesting, Twins, watch } from "./src/watch.ts";
 
 export type { DocumentsOptions, Open } from "./src/documents.ts";
 export { Documents } from "./src/documents.ts";
+
+export type { Channel, ServerOptions } from "./src/server.ts";
+export { Server } from "./src/server.ts";

@@ -1187,6 +1187,140 @@ ${DROP_TEMP}
     ),
   ],
 
+  "src/server.ts": [
+    ...ways(
+      "      params: { ...params, textDocument: { ...doc, text: twin } },",
+      [
+        "the source goes down instead of the twin",
+        "      params: { ...params, textDocument: { ...doc, text: doc.text as string } },",
+      ],
+      [
+        "the twin goes down under a uri of its own",
+        "      params: { ...params, textDocument: { ...doc, uri: `${doc.uri}.twin`, text: twin } },",
+      ],
+    ),
+    ...ways(
+      "    params: { ...params, contentChanges: [{ text: twin }] },",
+      [
+        "a change carries the author's text rather than the twin",
+        "    params: { ...params, contentChanges: [{ text: String(params.x) }] },",
+      ],
+    ),
+    ...ways(
+      "    if (!isRecord(one) || one.range !== undefined) continue;",
+      [
+        "a change describing one range is treated as a whole document",
+        "    if (!isRecord(one)) continue;",
+      ],
+    ),
+    ...ways(
+      "  const replaced = isRecord(sync) ? { ...sync, change: FULL } : FULL;",
+      [
+        "the editor keeps whatever sync the inner server advertised",
+        "  const replaced = sync;",
+      ],
+      [
+        "the rest of the sync options are thrown away with the change kind",
+        "  const replaced = FULL;",
+      ],
+    ),
+    ...ways(
+      "    if (message.id != null && this.#initialising.delete(String(message.id))) {",
+      [
+        "every later answer under an initialize id is rewritten too",
+        "    if (message.id != null && this.#initialising.has(String(message.id))) {",
+      ],
+    ),
+    ...ways(
+      "      const text = textOf(message.method, message.params);\n      if (text === undefined) return;",
+      [
+        "a change carrying nothing this can apply is forwarded anyway",
+        '      const text = textOf(message.method, message.params) ?? "";',
+      ],
+    ),
+    ...ways(
+      "      this.#documents.closed(uri);",
+      [
+        "a closed document is still held",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    const down = crossed(message, this.#documents.down, uri);",
+      [
+        "a message going down is crossed in the wrong direction",
+        "    const down = crossed(message, this.#documents.up, uri);",
+      ],
+      [
+        "a message going down is not crossed at all",
+        "    const down = message as typeof message | typeof DROPPED;",
+      ],
+    ),
+    ...ways(
+      "    if (id == null) return;",
+      [
+        "a request naming text with no twin is never answered",
+        NEVER_RETURN,
+      ],
+    ),
+    ...ways(
+      "    const up = crossed(message, this.#documents.up, uriOf(message.params));",
+      [
+        "a message coming up is crossed in the wrong direction",
+        "    const up = crossed(message, this.#documents.down, uriOf(message.params));",
+      ],
+      [
+        "a message coming up is not crossed at all",
+        "    const up = message as typeof message | typeof DROPPED;",
+      ],
+    ),
+    ...ways(
+      "    if (images.length < 2) return false;",
+      [
+        "a name landing in one place is still fanned out",
+        "    if (images.length < 1) return false;",
+      ],
+      [
+        "a name landing in several places is asked about once",
+        "    if (images.length < 99) return false;",
+      ],
+    ),
+    ...ways(
+      "        params: { ...params, position: image.start },",
+      [
+        "every arm is asked about the place the editor named",
+        "        params: { ...params },",
+      ],
+    ),
+    ...ways(
+      "          if (already.some((one) => JSON.stringify(one) === same)) continue;",
+      [
+        "the same authored edit is reported once per arm",
+        NEVER_CONTINUE_IN,
+      ],
+    ),
+    ...ways(
+      "    if (waiting.owed > 0) return;",
+      [
+        "the sum goes out on the first arm to answer",
+        NEVER_RETURN,
+      ],
+    ),
+    ...ways(
+      "      id: waiting.id,",
+      [
+        "the sum is sent under an id the editor never asked about",
+        "      id: -1,",
+      ],
+    ),
+    ...ways(
+      "    const up = crossed(message.result, this.#documents.up, undefined);",
+      [
+        "an arm's edits stay in twin coordinates",
+        "    const up = message.result as unknown;",
+      ],
+    ),
+  ],
   "src/documents.ts": [
     ...ways(
       "        return held === undefined ? disk(path) : Promise.resolve(held);",

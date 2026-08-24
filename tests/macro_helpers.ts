@@ -35,3 +35,22 @@ export function macros(): ReturnType<typeof registry> {
     // deno-lint-ignore no-explicit-any
   } as any]);
 }
+
+/**
+ * `twice`, keeping its item and emitting it a second time.
+ *
+ * One authored statement becomes two in the twin, so every name in it has two
+ * images. That is the shape a rename has to fan out over, and it needs a macro
+ * that multiplies rather than one that only drops.
+ */
+export function doubling(): ReturnType<typeof registry> {
+  return registry([{
+    kind: "attribute",
+    name: "twice",
+    expand: (_args: readonly ts.Expression[], item: { node: ts.Statement }) => [
+      item.node,
+      item.node,
+    ],
+    // deno-lint-ignore no-explicit-any
+  } as any]);
+}
