@@ -48,3 +48,6 @@ export {
   sourceRuns,
   spanning,
 } from "./src/spans.ts";
+
+export type { Found, Marked } from "./src/sentinel.ts";
+export { Marker, strip } from "./src/sentinel.ts";
