@@ -123,6 +123,33 @@ Nothing there is authoritative and none of it is meant to be committed. Losing
 the whole cache costs you some time and nothing else, and anything it can't
 verify on the way back in it throws away rather than trusts.
 
+## Keeping twins current
+
+`Twins` is the only thing in here that ever reads your source. Everything else
+sees twins, which is the point: a checker or a language server gets handed a
+file it can actually parse, and never the one you're editing.
+
+```ts
+import { interesting, Twins, watch } from "@hiisi/loitsu";
+
+const twins = new Twins({
+  registry: known,
+  against: "my-macros@1",
+  cacheDir: dir,
+});
+
+const stop = new AbortController();
+watch({ twins, paths: ["src"], signal: stop.signal });
+
+await twins.get("src/thing.ts"); // the twin, built if there isn't one yet
+```
+
+The rule it holds to is that a twin is never older than the last change it
+acknowledged. Editors write a file several times per save, so two rebuilds for
+one path overlap all the time, and whichever finishes last is not necessarily
+the one that read the newest bytes. A rebuild that's been overtaken throws its
+own result away instead of storing it.
+
 ## What gets left alone
 
 A name that isn't in the registry is left exactly as written. So if you do
@@ -193,13 +220,12 @@ the bug you spend an afternoon on.
 The api hasn't settled and breaking changes should be expected. I'd caution
 against using this for anything serious just yet.
 
-There's no editor integration yet, and no frontends. Expansion, the map and the
-cache are here; a file watcher that keeps twins current is next, then a language
-server that serves the twin under your source uri and maps the diagnostics back,
-and after that hooking into `deno check` and friends. The intent is that it just
-works once you depend on it, with at most a line in your `deno.json` or
-`package.json`, but that isn't true yet and I'd rather say so than let you find
-out.
+There's no editor integration yet, and no frontends. Expansion, the map, the
+cache and the watcher are here; a language server that serves the twin under
+your source uri and maps the diagnostics back is the next piece, and after that
+hooking into `deno check` and friends. The intent is that it just works once you
+depend on it, with at most a line in your `deno.json` or `package.json`, but
+that isn't true yet and I'd rather say so than let you find out.
 
 Expansion is whole file at a time, not incremental. Fine at the sizes this has
 been used on, and would want attention before it isn't.
