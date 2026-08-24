@@ -75,6 +75,9 @@ export {
   toSourceDiagnostics,
 } from "./src/translate.ts";
 
+export type { Message } from "./src/rpc.ts";
+export { frame, Frames, FramingError, messages } from "./src/rpc.ts";
+
 export type { Cached } from "./src/cache.ts";
 export {
   cached,

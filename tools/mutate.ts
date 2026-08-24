@@ -53,6 +53,9 @@ const NEVER_CONTINUE = "    if (false) continue;";
 /** The same two shapes at the indentation a nested block sits at. */
 const NEVER_CONTINUE_IN = "        if (false) continue;";
 const NEVER_IN = "    if (false) {";
+/** The head of the header line `frame` writes. Shared by the mutation that leaves it
+ * alone and the one that changes how the block ends, so the two cannot drift. */
+const WROTE = "    `Content-Length: ${body.length}";
 /** A statement removed by replacing it with one that does nothing, which is how a
  * step whose absence has to be noticed downstream is tested. */
 const DOES_NOTHING = "  void 0;";
@@ -971,6 +974,101 @@ ${DROP_TEMP}
       from: "round < rounds;",
       to: "round < rounds * 1000;",
     },
+  ],
+
+  "src/rpc.ts": [
+    ...ways(
+      "      if (hay[at + i] !== needle[i]) continue outer;",
+      [
+        "every byte compares equal, so a separator is found at the first offset",
+        "      if (false) continue outer;",
+      ],
+    ),
+    ...ways(
+      "  outer: for (let at = from; at + needle.length <= hay.length; at++) {",
+      [
+        "a separator ending exactly at the buffer's end is not found",
+        "  outer: for (let at = from; at + needle.length < hay.length; at++) {",
+      ],
+    ),
+    ...ways(
+      "const LENGTH = /^content-length$/i;",
+      [
+        "the length field is matched case-sensitively",
+        "const LENGTH = /^content-length$/;",
+      ],
+    ),
+    ...ways(
+      "    if (!LENGTH.test(line.slice(0, at).trim())) continue;",
+      [
+        "any header field is read as the length, so Content-Type decides it",
+        NEVER_CONTINUE,
+      ],
+    ),
+    ...ways(
+      "    if (!/^[0-9]+$/.test(said)) {",
+      [
+        "a length that is not a plain count is passed to Number and believed",
+        NEVER_IN,
+      ],
+    ),
+    ...ways(
+      '  throw new FramingError("a header block carried no content-length");',
+      [
+        "a header with no length reads a body of nothing instead of refusing",
+        "  return 0;",
+      ],
+    ),
+    ...ways(
+      "      if (this.#held.length - from < length) return out;",
+      [
+        "a body that has not all arrived is decoded anyway",
+        "      if (false) return out;",
+      ],
+      [
+        "a body that has exactly arrived is held back forever",
+        "      if (this.#held.length - from <= length) return out;",
+      ],
+    ),
+    ...ways(
+      "      this.#held = this.#held.slice(from + length);",
+      [
+        "the body is left in the buffer, so the next drain reads it as a header",
+        "      this.#held = this.#held.slice(from);",
+      ],
+    ),
+    ...ways(
+      "      const body = this.#decoder.decode(\n        this.#held.subarray(from, from + length),\n      );",
+      [
+        "the decode runs past the body into whatever followed it",
+        "      const body = this.#decoder.decode(this.#held.subarray(from));",
+      ],
+    ),
+    ...ways(
+      "    grown.set(chunk, this.#held.length);",
+      [
+        "a new chunk overwrites what was held instead of following it",
+        "    grown.set(chunk, 0);",
+      ],
+    ),
+    ...ways(
+      `${WROTE}\\r\\n\\r\\n\`,`,
+      [
+        "the written count is utf-16 units rather than bytes",
+        "    `Content-Length: ${JSON.stringify(message).length}\\r\\n\\r\\n`,",
+      ],
+      [
+        "the written header block ends in bare newlines",
+        `${WROTE}\\n\\n\`,`,
+      ],
+    ),
+    ...ways(
+      "  if (frames.pending > 0) {",
+      [
+        "a stream ending mid-message is treated as having ended cleanly",
+        "  if (false) {",
+      ],
+    ),
   ],
 };
 
