@@ -119,6 +119,19 @@ export class Mapping {
     return this.#pair.spans;
   }
 
+  /** The encoding positions crossing this mapping are counted in. */
+  get encoding(): Encoding {
+    return this.#encoding;
+  }
+
+  /** The text one range covers, in whichever of the two documents. */
+  textOf(lines: Lines, range: Range): string {
+    return lines.text.slice(
+      lines.offsetAt(range.start, this.#encoding),
+      lines.offsetAt(range.end, this.#encoding),
+    );
+  }
+
   /**
    * Every place in the twin an authored position ended up, in twin order.
    *
@@ -152,14 +165,29 @@ export class Mapping {
    * The two crossings are mirror images and differ only in which text indexes
    * the incoming range, which text indexes the answer, and which of the span
    * module's two questions is asked. Written twice they drift.
+   *
+   * A backwards range still crosses to nothing, because it names no text in
+   * either document and there is no position to answer with.
+   *
+   * An empty range is a position rather than a run, and is crossed as one. The
+   * span module answers a run of no length with nothing, which is right for a
+   * run and wrong here: a diagnostic pointing between two characters is ordinary
+   * in the protocol, tsc emits them, and dropping every one of them would be a
+   * whole class of diagnostics silently missing from a file with no macros in
+   * it at all.
    */
   #cross(
     range: Range,
     from: Lines,
     to: Lines,
     ask: (spans: SpanTable, run: Run) => Run[],
+    point: (at: Position) => Position[],
   ): Range[] {
-    return ask(this.#pair.spans, runOf(from, range, this.#encoding))
+    const run = runOf(from, range, this.#encoding);
+    if (run.length === 0) {
+      return point(range.start).map((at) => ({ start: at, end: at }));
+    }
+    return ask(this.#pair.spans, run)
       .map((run) =>
         to.rangeAt(run.start, run.start + run.length, this.#encoding)
       );
@@ -167,7 +195,13 @@ export class Mapping {
 
   /** Every twin range an authored range covers, in twin order. */
   toTwinRanges(range: Range): Range[] {
-    return this.#cross(range, this.#source, this.#twin, outputRuns);
+    return this.#cross(
+      range,
+      this.#source,
+      this.#twin,
+      outputRuns,
+      (at) => this.toTwin(at),
+    );
   }
 
   /**
@@ -178,7 +212,16 @@ export class Mapping {
    * range covering both would edit what sits in the middle.
    */
   toSourceRanges(range: Range): Range[] {
-    return this.#cross(range, this.#twin, this.#source, sourceRuns);
+    return this.#cross(
+      range,
+      this.#twin,
+      this.#source,
+      sourceRuns,
+      (at) => {
+        const back = this.toSource(at);
+        return back === undefined ? [] : [back];
+      },
+    );
   }
 }
 
@@ -283,12 +326,23 @@ export interface Renamed {
  * source, so their authored ranges are comparable and the union is over one
  * coordinate system.
  *
- * **The incoming `newText` is deliberately not used.** A twin may hold a name a
- * macro derived rather than the one that was written, and splicing its
+ * **The incoming `newText` is used only where the twin holds what the author
+ * wrote.** A twin may hold a name a macro derived, and splicing that twin's
  * replacement onto the authored range would put text nobody typed into the
- * author's file. The edits are here to say *where*, and `newName` is what goes
- * there: no twin is ever edited by anybody, each is rebuilt once the source
- * changes.
+ * author's file. So the twin's text at the edit's range is compared against the
+ * authored text at the range it maps to, and only when they agree does the
+ * twin's replacement carry across.
+ *
+ * That distinction is not a nicety. TypeScript returns a shorthand property's
+ * rename with `prefixText`, so an inner server sends `foo: bar` for a rename of
+ * `foo` to `bar` in `{ foo }`, keeping the property name and renaming only the
+ * binding. Writing `newName` alone there produces `{ bar }`, which silently
+ * renames a public property and breaks every reader of it. The same shape
+ * arrives as `suffixText` for the mirror case.
+ *
+ * Where the twin does hold a derived name, `newName` is written instead, and
+ * that is the honest answer rather than a good one: an affix computed against a
+ * name the author never wrote is not a thing to splice into their file.
  *
  * Identical edits from different twins collapse, which is the normal case: a
  * declaration outside any conditional appears in every twin and is one authored
@@ -310,11 +364,18 @@ export function renameEdits(
     for (const edit of arm) {
       const ranges = map.toSourceRanges(edit.range);
       if (ranges.length === 0) dropped++;
+      const wrote = map.textOf(map.twin, edit.range);
       for (const range of ranges) {
         const key = rangeKey(range);
         if (seen.has(key)) continue;
         seen.add(key);
-        edits.push({ range, newText: newName });
+        // The twin holding the authored text is what makes its replacement safe
+        // to carry: the affixes in it were computed against the same name.
+        const authored = map.textOf(map.source, range);
+        edits.push({
+          range,
+          newText: wrote === authored ? edit.newText : newName,
+        });
       }
     }
   }

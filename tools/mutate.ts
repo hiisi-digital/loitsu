@@ -144,6 +144,36 @@ const PLANS: Record<string, readonly Mutation[]> = {
       ],
     ),
   ],
+  "tests/readme_test.ts": [
+    ...ways(
+      '      if (!line.startsWith("import ")) {',
+      [
+        "an import line is checked as a statement, so the merged program repeats\n      // every import and cannot compile at all",
+        "      if (true) {",
+      ],
+    ),
+    ...ways(
+      "        bodies.push(line);",
+      [
+        "the statements a block was written to show are dropped, leaving imports\n      // that check trivially",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "      assert(plain !== null, `readme import not understood: ${line}`);",
+      [
+        "an import shape the merge cannot read is dropped rather than reported",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    assert(known.has(tag), `unknown fence language in the readme: ${tag}`);",
+      [
+        "a misspelled fence language passes, so a block nobody checks reads as one\n      // that was checked",
+        DOES_NOTHING,
+      ],
+    ),
+  ],
   "src/translate.ts": [
     ...ways(
       "  return { start, length: end - start };",
@@ -235,10 +265,25 @@ const PLANS: Record<string, readonly Mutation[]> = {
       ],
     ),
     ...ways(
-      "        edits.push({ range, newText: newName });",
+      "          newText: wrote === authored ? edit.newText : newName,",
       [
-        "the twin's replacement is spliced onto the authored range, inventing text",
-        "        edits.push({ range, newText: edit.newText });",
+        "the twin's replacement is spliced onto the authored range whatever it\n      // was computed against, so a derived name's affix lands on the source",
+        "          newText: edit.newText,",
+      ],
+      [
+        "the affix a shorthand property needs is dropped, leaving `{ bar }`\n      // where `{ foo: bar }` was meant",
+        "          newText: newName,",
+      ],
+    ),
+    ...ways(
+      "    if (run.length === 0) {",
+      [
+        "a point is crossed as a run, so every zero-length diagnostic is dropped",
+        NEVER_IN,
+      ],
+      [
+        "a backwards range is crossed as a point at its start rather than as nothing",
+        "    if (run.length <= 0) {",
       ],
     ),
     ...ways(

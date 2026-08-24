@@ -410,6 +410,77 @@ Deno.test("the twin's own replacement text is never spliced into the source", ()
   assertEquals(edits[0]!.newText.includes("__deno"), false);
 });
 
+Deno.test("a shorthand property's affix survives, because the twin holds the authored name", () => {
+  // TypeScript answers a rename of `foo` in `{ foo }` with `prefixText: "foo: "`,
+  // so an inner server sends `foo: bar` to keep the property and rename only the
+  // binding. Writing the bare new name there produces `{ bar }`, which renames a
+  // public property nobody asked about and breaks every reader of it.
+  //
+  // Verified against the compiler rather than assumed: `findRenameLocations` with
+  // `providePrefixAndSuffixTextForRename` returns exactly that shape for this
+  // source.
+  const source = "const foo = 1;\nconst o = { foo };\n";
+  const map = new Mapping({
+    source,
+    twin: source,
+    spans: identity(source.length),
+  });
+  const { edits } = renameEdits("bar", [[map, [
+    { range: rangeOf(source, "foo"), newText: "bar" },
+    {
+      range: offsets(
+        source,
+        source.lastIndexOf("foo"),
+        source.lastIndexOf("foo") + 3,
+      ),
+      newText: "foo: bar",
+    },
+  ]]]);
+  assertEquals(edits.length, 2);
+  assertEquals(edits[0]!.newText, "bar", "the declaration is a plain rename");
+  assertEquals(
+    edits[1]!.newText,
+    "foo: bar",
+    "and the shorthand keeps its property name",
+  );
+});
+
+Deno.test("an affix computed against a derived name is not spliced in", () => {
+  // The other half of the same rule. Here the twin holds `greet__deno`, which
+  // the author never wrote, so whatever the inner server built around it was
+  // built around a name that does not exist in the source. The authored name is
+  // what goes in, affix or no affix.
+  const source = "const greet = 1;\nconst o = { greet };\n";
+  const map = new Mapping({
+    source,
+    twin: "const greet__deno = 1;\nconst o = { greet__deno };\n",
+    spans: spanning([
+      { outStart: 6, length: 5, inStart: 6 },
+      { outStart: 34, length: 5, inStart: 28 },
+    ]),
+  });
+  const twin = map.twin.text;
+  const { edits } = renameEdits("hello", [[map, [
+    { range: offsets(twin, 6, 17), newText: "hello__deno" },
+    {
+      range: offsets(
+        twin,
+        twin.lastIndexOf("greet__deno"),
+        twin.lastIndexOf("greet__deno") + 11,
+      ),
+      newText: "greet__deno: hello__deno",
+    },
+  ]]]);
+  assertEquals(edits.length, 2);
+  for (const edit of edits) {
+    assertEquals(
+      edit.newText,
+      "hello",
+      "the authored name, nothing built on a derived one",
+    );
+  }
+});
+
 Deno.test("an edit naming only invented text is dropped and counted", () => {
   const { deno } = bothTwins();
   const twin = deno.twin.text;
@@ -564,15 +635,40 @@ Deno.test("a range that runs backwards maps to nothing rather than to everything
   assertEquals(map.toTwinRanges(backwards), []);
 });
 
-Deno.test("an empty range maps to nothing, because it covers nothing", () => {
+Deno.test("an empty range crosses as the position it names, not as nothing", () => {
   const source = "abcdef";
   const map = new Mapping({ source, twin: source, spans: identity(6) });
-  const empty: Range = {
-    start: { line: 0, character: 2 },
-    end: { line: 0, character: 2 },
-  };
-  assertEquals(map.toSourceRanges(empty), []);
-  assertEquals(map.toTwinRanges(empty), []);
+  const at: Position = { line: 0, character: 2 };
+  const empty: Range = { start: at, end: at };
+  assertEquals(map.toSourceRanges(empty), [{ start: at, end: at }]);
+  assertEquals(map.toTwinRanges(empty), [{ start: at, end: at }]);
+});
+
+Deno.test("an empty range in text the printer invented still crosses to nothing", () => {
+  // The point crossing goes through `toSource`, so the ratified drop survives
+  // it: a position the author never typed answers with nothing, empty range or
+  // not.
+  const { deno } = bothTwins();
+  const twin = deno.twin.text;
+  const padded = twin.indexOf("export") - 1;
+  assertEquals(twin[padded], " ", "aiming at a character the printer added");
+  const at = deno.twin.positionAt(padded);
+  assertEquals(deno.toSourceRanges({ start: at, end: at }), []);
+});
+
+Deno.test("a point diagnostic on a file with no macros survives the crossing", () => {
+  const source = "const x = 1;\n";
+  const map = new Mapping({
+    source,
+    twin: source,
+    spans: identity(source.length),
+  });
+  const at: Position = { line: 0, character: 6 };
+  const out = toSourceDiagnostic(map, URI, {
+    range: { start: at, end: at },
+    message: "expected a name",
+  });
+  assertEquals(out?.range, { start: at, end: at });
 });
 
 Deno.test("an authored range comes back as a twin range covering the same text", () => {
