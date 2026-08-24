@@ -304,37 +304,61 @@ const PLANS: Record<string, readonly Mutation[]> = {
     },
   ],
   "src/watch.ts": [
-    // There is deliberately no mutation of `<=` to `<` here. `changed` raises the
-    // generation before every rebuild and `get` rebuilds only for a path it has never
-    // seen, so two rebuilds of one path never carry the same generation. The two
-    // spellings are the same program, and a mutation that cannot change behaviour
-    // cannot be caught by any test. The guard is still held down, by the mutation
-    // below that removes it outright.
+    // Everything else in the suite injects a reader, so nothing else would notice
+    // the default one going away. It is what a consumer actually gets.
     ...ways(
-      "    if (at <= (this.#built.get(path) ?? -1)) return;",
+      "    this.#read = options.read ?? ((path) => Deno.readTextFile(path));",
       [
-        "the last rebuild to finish wins, whatever generation it saw",
+        "there is no default reader, so a Twins built the documented way cannot read",
+        "    this.#read = options.read!;",
+      ],
+    ),
+    // The declined `<=` to `<` mutation that used to sit here is gone with the
+    // counter it was about. Its stated reason was also wrong: two rebuilds of one
+    // path could carry the same number, because `forget` reset it. One stamp from
+    // one counter, never reused, means the guard is a single equality and every
+    // way of loosening it is reachable.
+    ...ways(
+      "    if (at !== this.#seen.get(path)) return;",
+      [
+        "the last rebuild to finish wins, whatever it saw",
         NEVER_RETURN,
       ],
       [
-        "only the first rebuild of a path ever stores",
-        "    if (this.#built.has(path)) return;",
+        "a rebuild older than the newest change still stores",
+        "    if (at > (this.#seen.get(path) ?? Infinity)) return;",
+      ],
+      [
+        "a rebuild for a forgotten path resurrects it",
+        "    if (this.#seen.has(path) && at !== this.#seen.get(path)) return;",
       ],
     ),
     {
-      what: "a rebuild in flight for a forgotten path resurrects it",
-      from: "    if (!this.#seen.has(path)) return;",
-      to: NEVER_RETURN,
+      what: "a change does not take a new stamp, so nothing overtakes",
+      from: "    this.#seen.set(path, ++this.#next);",
+      to: "    this.#seen.set(path, this.#seen.get(path) ?? ++this.#next);",
     },
     {
-      what: "a change does not raise the generation, so nothing overtakes",
-      from: "    this.#seen.set(path, (this.#seen.get(path) ?? 0) + 1);",
-      to: "    this.#seen.set(path, this.#seen.get(path) ?? 0);",
+      what: "a second request does not wait for the build already running",
+      from: "    if (running !== undefined) await running;",
+      to: NEVER_RETURN.replace("return;", "await running;"),
     },
     {
       what: "get rebuilds a path it already holds a twin for",
-      from: "    if (!this.#seen.has(path)) {",
-      to: "    if (true) {",
+      from:
+        "    else if (!this.#seen.has(path)) await this.#acknowledge(path);",
+      to: "    else await this.#acknowledge(path);",
+    },
+    {
+      what: "a forgotten path keeps waiting on the rebuild it abandoned",
+      from: "    this.#building.delete(path);",
+      to: "    /* kept */;",
+    },
+    {
+      what: "a macro that throws takes the process with it",
+      from:
+        "      this.#store(path, at, undefined, `${(err as Error).message}`);",
+      to: "      throw err;",
     },
     {
       what: "an unreadable file keeps whatever twin it had",
@@ -354,20 +378,27 @@ const PLANS: Record<string, readonly Mutation[]> = {
     },
     {
       what: "the path never reaches the cache, so tsx is expanded as ts",
-      from: `      path,${CALL_END}`,
-      to: `      undefined,${CALL_END}`,
+      from: "        path,",
+      to: "        undefined,",
     },
     ...ways(
-      '  return (path.endsWith(".ts") || path.endsWith(".tsx")) &&\n    !path.endsWith(".d.ts");',
-      [
-        "declaration files are expanded too",
-        '  return path.endsWith(".ts") || path.endsWith(".tsx");',
-      ],
-      [
-        "tsx files are ignored",
-        '  return path.endsWith(".ts") && !path.endsWith(".d.ts");',
-      ],
+      "  return source && !declaration;",
+      ["declaration files are expanded too", "  return source;"],
       ["everything is interesting", "  return true;"],
+    ),
+    ...ways(
+      '  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) =>',
+      [
+        "the module extensions are ignored",
+        '  const source = [".ts", ".tsx"].some((e) =>',
+      ],
+    ),
+    ...ways(
+      '  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>',
+      [
+        "only the plain declaration form is refused",
+        '  const declaration = [".d.ts"].some((e) =>',
+      ],
     ),
     {
       what: "a deleted file keeps its twin instead of being forgotten",
@@ -383,6 +414,22 @@ const PLANS: Record<string, readonly Mutation[]> = {
       what: "the filter is dropped, so every file is expanded",
       from: "        if (matches(path)) pending.add(path);",
       to: "        pending.add(path);",
+    },
+    {
+      what: "a signal that already aborted leaves the watch running forever",
+      from: "  if (options.signal?.aborted === true) stop();",
+      to: "  /* kept */;",
+    },
+    {
+      what: "the debounce has no ceiling, so a sustained write starves it",
+      from: "        Math.min(settleMs, maxWaitMs - (Date.now() - oldest)),",
+      to: "        settleMs,",
+    },
+    {
+      what:
+        "the batch clock is never restarted, so every later batch is instant",
+      from: "    oldest = undefined;",
+      to: "    /* kept */;",
     },
     {
       what: "a batch collected at the moment of the abort is dropped",

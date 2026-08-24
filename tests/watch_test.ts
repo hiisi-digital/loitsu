@@ -45,6 +45,9 @@ const DROPPED = `[cfg(node)]\nfunction gone() {\n  return 1;\n}\n`;
  * read open so two rebuilds can be made to overlap deliberately. */
 function reader(files: Record<string, string>) {
   const held = new Map<string, PromiseWithResolvers<void>>();
+  /** Gates a read has already taken and is waiting on, so `release` reaches them
+   * after the hold itself has been consumed. */
+  const waiting = new Map<string, PromiseWithResolvers<void>[]>();
   const state = {
     files: { ...files },
     reads: [] as string[],
@@ -53,14 +56,27 @@ function reader(files: Record<string, string>) {
       held.set(path, Promise.withResolvers<void>());
     },
     release(path: string) {
+      for (const gate of waiting.get(path) ?? []) gate.resolve();
+      waiting.delete(path);
       held.get(path)?.resolve();
       held.delete(path);
     },
     read: async (path: string): Promise<string> => {
       state.reads.push(path);
-      const gate = held.get(path);
-      if (gate !== undefined) await gate.promise;
+      // Captured before the gate rather than after it. A slow read returns what
+      // was on disk when it began, and a held read that returns whatever is
+      // there when it is released can never be stale, which makes every test
+      // built on one agree with any guard at all.
       const text = state.files[path];
+      // One shot, which is what `hold` says it is. Holding every read until the
+      // release instead means a test cannot let a later read through while an
+      // earlier one is still blocked, which is the only shape that overlaps.
+      const gate = held.get(path);
+      if (gate !== undefined) {
+        held.delete(path);
+        (waiting.get(path) ?? waiting.set(path, []).get(path)!).push(gate);
+        await gate.promise;
+      }
       if (text === undefined) {
         throw new Deno.errors.NotFound(`no such file: ${path}`);
       }
@@ -141,28 +157,41 @@ Deno.test("changed on an unchanged file still produces the current twin", async 
 });
 
 Deno.test("a rebuild that has been overtaken throws its own result away", async () => {
-  // The load-bearing one. A slow read for generation 1 finishes after a fast read
-  // for generation 2 has already stored its twin. Without the guard the stale text
-  // wins because it landed last, and the editor shows diagnostics for a file the
-  // author has already moved past.
+  // The load-bearing one, and it has to genuinely overlap or it holds under any
+  // guard at all. The stale read starts first, sees DROPPED, and is still blocked
+  // while a later change reads KEPT and stores. Only then is it released, so it
+  // lands last with the older text, which is exactly what the guard is for.
   const fs = reader({ "/a.ts": KEPT });
   const twins = twinsOver(fs);
   await twins.get("/a.ts");
 
-  fs.hold("/a.ts");
   fs.files["/a.ts"] = DROPPED;
-  const slow = twins.changed("/a.ts"); // generation 1, blocked in its read
+  fs.hold("/a.ts");
+  const stale = twins.changed("/a.ts"); // reads DROPPED, then blocks
+  await Promise.resolve(); // let it reach its read
 
   fs.files["/a.ts"] = KEPT;
-  // generation 2 reads a different path's worth of content: it is not held, so it
-  // completes first and stores.
-  fs.release("/a.ts");
-  await slow;
-  await twins.changed("/a.ts"); // generation 2, completes and stores
+  await twins.changed("/a.ts"); // reads KEPT and stores, while the stale one waits
 
-  const twin = twins.peek("/a.ts");
-  assertEquals(twin!.generation, 2);
-  assertEquals(twin!.code, expand(KEPT, macros()).code);
+  assertEquals(
+    twins.peek("/a.ts")!.code,
+    expand(KEPT, macros()).code,
+    "the newer text is stored before the stale rebuild is released",
+  );
+
+  fs.release("/a.ts");
+  await stale; // and now the stale one finishes, holding DROPPED
+
+  assertEquals(
+    twins.peek("/a.ts")!.code,
+    expand(KEPT, macros()).code,
+    "which it threw away rather than storing, though it landed last",
+  );
+  assertNotEquals(
+    expand(DROPPED, macros()).code,
+    expand(KEPT, macros()).code,
+    "and the two texts really do expand differently, or this proves nothing",
+  );
 });
 
 Deno.test("the overtaking is by generation, not by completion order", async () => {
@@ -196,13 +225,14 @@ Deno.test("the overtaking is by generation, not by completion order", async () =
   assert(twin!.generation >= 2);
 });
 
-Deno.test("a rebuild for the same generation does not replace the stored twin", () => {
-  // Two rebuilds of one change cannot have found anything different, so a second
-  // store buys nothing and makes the held twin depend on which finished last.
+Deno.test("asking twice for an unchanged path does not rebuild it", () => {
+  // Named for what it exercises. There is one rebuild here: the second `get`
+  // returns without starting another, which is what keeps a language server from
+  // re-expanding a file on every request.
   //
-  // Asserted on object identity, because the generation and the code are equal
-  // either way: only the identity of the stored object says whether it was written
-  // over. A test comparing generations passes against a store that always happens.
+  // Asserted on object identity, because the stamp and the code are equal either
+  // way: only the identity of the stored object says whether it was written over.
+  // A test comparing stamps passes against a store that always happens.
   const fs = reader({ "/a.ts": KEPT });
   const twins = twinsOver(fs);
   return twins.get("/a.ts").then(async (first) => {
@@ -214,12 +244,14 @@ Deno.test("a rebuild for the same generation does not replace the stored twin", 
       "the same object is still there, so nothing stored over it",
     );
     assertEquals(twins.peek("/a.ts")!.generation, first!.generation);
+    assertEquals(fs.reads.length, 1, "the second get read nothing");
 
     // The control: a real change does replace it, so this is not asserting that
-    // nothing is ever stored.
+    // nothing is ever stored, nor that a read never happens again.
     fs.files["/a.ts"] = DROPPED;
     await twins.changed("/a.ts");
     assertNotStrictEquals(twins.peek("/a.ts"), held);
+    assertEquals(fs.reads.length, 2);
   });
 });
 
@@ -279,6 +311,28 @@ Deno.test("a file that cannot be read is reported rather than thrown", async () 
   assert(why !== undefined);
   assertEquals(why.why, "NotFound");
   assertEquals(why.path, "/gone.ts");
+});
+
+Deno.test("the default reader is Deno's, and its failure reaches `why` by name", async () => {
+  // Every other test here injects a reader, so nothing else exercises the default
+  // one, and the readme names the string this produces. `NotFound` is the
+  // constructor name of what `Deno.readTextFile` throws for a missing path, which
+  // is exactly the state a file is in for a moment during an atomic save.
+  const twins = new Twins({
+    registry: registry([]),
+    against: "none",
+    cacheDir: await Deno.makeTempDir(),
+  });
+  const missing = `${await Deno.makeTempDir()}/never-written.ts`;
+  assertEquals(await twins.get(missing), undefined);
+  assertEquals(twins.failure(missing)?.why, "NotFound");
+
+  // The control: a path that does exist reads, so this is not measuring a reader
+  // that fails on everything.
+  const there = `${await Deno.makeTempDir()}/there.ts`;
+  await Deno.writeTextFile(there, KEPT);
+  assert((await twins.get(there)) !== undefined);
+  assertEquals(twins.failure(there), undefined);
 });
 
 Deno.test("a file that becomes readable clears the failure", async () => {
@@ -358,12 +412,14 @@ Deno.test("the cache is used, so an identical file is not expanded twice", async
 });
 
 Deno.test("interesting accepts what carries a body and refuses what does not", () => {
-  for (const yes of ["/a.ts", "/deep/b.tsx", "a.ts"]) {
+  for (const yes of ["/a.ts", "/deep/b.tsx", "a.ts", "/a.mts", "/a.cts"]) {
     assertEquals(interesting(yes), true, yes);
   }
   for (
     const no of [
       "/a.d.ts",
+      "/a.d.mts",
+      "/a.d.cts",
       "/a.js",
       "/a.json",
       "/a.md",
@@ -566,6 +622,220 @@ Deno.test("a batch still settling when the watch stops is not dropped", async ()
       "the pending batch was flushed on the way out",
     );
     assertEquals(twins.peek(path)!.code, expand(KEPT, macros()).code);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a rebuild from before a forget cannot land on top of a later twin", () => {
+  // The stamps come from one counter that never restarts, so everything issued
+  // after a forget outranks anything still in flight from before it. With a
+  // per-path counter that began again at zero, a held rebuild carried a higher
+  // number than the fresh one and won, then held its ground for as many edits as
+  // the counter took to climb back past it.
+  const fs = reader({ "/a.ts": KEPT });
+  const twins = twinsOver(fs);
+  return (async () => {
+    await twins.get("/a.ts");
+    await twins.changed("/a.ts");
+    await twins.changed("/a.ts");
+
+    fs.files["/a.ts"] = DROPPED;
+    fs.hold("/a.ts");
+    const stale = twins.changed("/a.ts"); // reads DROPPED, then blocks
+    await Promise.resolve();
+
+    twins.forget("/a.ts"); // the file was closed
+    fs.files["/a.ts"] = KEPT;
+    await twins.get("/a.ts"); // and reopened
+
+    fs.release("/a.ts");
+    await stale;
+
+    assertEquals(
+      twins.peek("/a.ts")!.code,
+      expand(KEPT, macros()).code,
+      "the twin from before the forget did not come back",
+    );
+
+    // and the next few edits are not swallowed either, which is how the defect
+    // showed itself: the stale stamp sat above the counter for three of them
+    for (let n = 0; n < 3; n++) {
+      fs.files["/a.ts"] = n % 2 === 0 ? DROPPED : KEPT;
+      await twins.changed("/a.ts");
+      assertEquals(
+        twins.peek("/a.ts")!.code,
+        expand(fs.files["/a.ts"]!, macros()).code,
+        `edit ${n + 1} took effect`,
+      );
+    }
+  })();
+});
+
+Deno.test("two requests landing together on one path both get the twin", async () => {
+  // What a language server does constantly. The second caller used to take an
+  // early return and read the map before the first rebuild had stored, so it got
+  // `undefined` with `failure` also `undefined`: a third state nothing describes.
+  const fs = reader({ "/a.ts": KEPT });
+  const twins = twinsOver(fs);
+  const [first, second] = await Promise.all([
+    twins.get("/a.ts"),
+    twins.get("/a.ts"),
+  ]);
+  assertEquals(first?.code, expand(KEPT, macros()).code);
+  assertEquals(second?.code, first?.code, "and not undefined");
+  assertEquals(fs.reads.length, 1, "one build, not two");
+});
+
+Deno.test("a signal that has already aborted stops the watch immediately", async () => {
+  // A listener added to a signal that has already fired never runs, so the
+  // watcher was never closed and the loop never ended: a leaked handle and a
+  // promise nobody could await.
+  const dir = await Deno.realPath(
+    await Deno.makeTempDir({ prefix: "loitsu-w-" }),
+  );
+  try {
+    const control = new AbortController();
+    control.abort();
+    const twins = twinsOver(reader({}));
+    await Promise.race([
+      watch({ paths: [dir], twins, signal: control.signal }),
+      new Promise((_, no) =>
+        setTimeout(() => no(new Error("never returned")), 2000)
+      ),
+    ]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("a macro that throws is a failure to build, not a dead process", async () => {
+  // A macro is ordinary code and ordinary code throws. The rejection reached
+  // nobody, because the caller is a timer callback, and Deno ends the process on
+  // an unhandled rejection. There is a twin that could not be built, which is
+  // what `failure` already says for a file that could not be read.
+  const boom = new Twins({
+    registry: registry([
+      {
+        kind: "attribute",
+        name: "cfg",
+        expand: () => {
+          throw new Error("macro exploded");
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any,
+    ]),
+    against: "v1",
+    cacheDir: undefined,
+    read: () => Promise.resolve(KEPT),
+  });
+  assertEquals(await boom.get("/a.ts"), undefined);
+  assertEquals(boom.failure("/a.ts")?.why, "macro exploded");
+  assertEquals(boom.peek("/a.ts"), undefined);
+});
+
+Deno.test("a write that never pauses is still flushed, rather than starving", async () => {
+  // Resetting the debounce on every event is what batches a burst. On its own it
+  // also means a stream that never pauses for `settleMs` is never flushed at all,
+  // and a formatter pass over a tree is exactly that shape.
+  const dir = await Deno.realPath(
+    await Deno.makeTempDir({ prefix: "loitsu-w-" }),
+  );
+  const control = new AbortController();
+  const batches: string[][] = [];
+  try {
+    const twins = new Twins({
+      registry: macros(),
+      against: "v1",
+      cacheDir: undefined,
+    });
+    const running = watch({
+      paths: [dir],
+      twins,
+      signal: control.signal,
+      settleMs: 50,
+      maxWaitMs: 120,
+      onBatch: (paths) => {
+        batches.push([...paths]);
+      },
+    });
+    // Events closer together than settleMs, for longer than maxWaitMs.
+    const until = Date.now() + 700;
+    let n = 0;
+    while (Date.now() < until) {
+      await Deno.writeTextFile(`${dir}/f${n++}.ts`, KEPT);
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    assertEquals(
+      batches.length > 0,
+      true,
+      `nothing flushed while ${n} files were written`,
+    );
+    control.abort();
+    await running;
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("the debounce still batches after the first batch has gone out", async () => {
+  // The clock the ceiling is measured from is restarted when a batch flushes. Left
+  // where it was, every later batch is already past its deadline and goes out on
+  // the next event, so two files saved together arrive as two batches and the
+  // debounce quietly stops working after the first one.
+  const dir = await Deno.realPath(
+    await Deno.makeTempDir({ prefix: "loitsu-w-" }),
+  );
+  const control = new AbortController();
+  const batches: string[][] = [];
+  try {
+    const twins = new Twins({
+      registry: macros(),
+      against: "v1",
+      cacheDir: undefined,
+    });
+    const running = watch({
+      paths: [dir],
+      twins,
+      signal: control.signal,
+      settleMs: 60,
+      maxWaitMs: 150,
+      onBatch: (paths) => {
+        batches.push([...paths]);
+      },
+    });
+    await Deno.writeTextFile(`${dir}/one.ts`, KEPT);
+    while (batches.length === 0) await new Promise((r) => setTimeout(r, 10));
+    // Long enough that the first batch's ceiling would have expired. Left where
+    // it was, the clock is already past its deadline and every event after this
+    // flushes on its own.
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Two saves inside one settle window, well before the ceiling.
+    await Deno.writeTextFile(`${dir}/two.ts`, KEPT);
+    await new Promise((r) => setTimeout(r, 10));
+    await Deno.writeTextFile(`${dir}/three.ts`, KEPT);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const later = batches.slice(1).flat();
+    assertEquals(
+      later.some((p) => p.endsWith("two.ts")),
+      true,
+      "both files were seen",
+    );
+    assertEquals(
+      later.some((p) => p.endsWith("three.ts")),
+      true,
+    );
+    assertEquals(
+      batches.length,
+      2,
+      `two saves inside one window should be one batch, got ${
+        JSON.stringify(batches.map((b) => b.map((p) => p.split("/").pop())))
+      }`,
+    );
+    control.abort();
+    await running;
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

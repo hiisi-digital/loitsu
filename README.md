@@ -130,7 +130,7 @@ sees twins, which is the point: a checker or a language server gets handed a
 file it can actually parse, and never the one you're editing.
 
 ```ts
-import { interesting, Twins, watch } from "@hiisi/loitsu";
+import { Twins, watch } from "@hiisi/loitsu";
 
 const twins = new Twins({
   registry: known,
@@ -139,9 +139,12 @@ const twins = new Twins({
 });
 
 const stop = new AbortController();
-watch({ twins, paths: ["src"], signal: stop.signal });
+const watching = watch({ twins, paths: ["src"], signal: stop.signal });
 
 await twins.get("src/thing.ts"); // the twin, built if there isn't one yet
+
+stop.abort();
+await watching; // it resolves once the watch has actually let go
 ```
 
 The rule it holds to is that a twin is never older than the last change it
@@ -149,6 +152,25 @@ acknowledged. Editors write a file several times per save, so two rebuilds for
 one path overlap all the time, and whichever finishes last is not necessarily
 the one that read the newest bytes. A rebuild that's been overtaken throws its
 own result away instead of storing it.
+
+Events are batched, so one save is one rebuild and not five. A batch waits
+`settleMs` for the writing to stop, and `maxWaitMs` is the longest it may be
+held open however many events keep arriving, which is what gets you fresh twins
+in the middle of a formatter walking your whole tree instead of at the end of
+it.
+
+A file that can't be read is an ordinary thing halfway through a save, so it is
+reported rather than thrown: `get` and `peek` give you nothing and `failure`
+tells you why.
+
+```ts
+twins.failure("src/thing.ts")?.why; // "NotFound" while the editor is mid-write
+```
+
+`interesting` is what decides which paths are worth expanding, and it is the
+default. It takes the TypeScript sources and leaves the declaration files, since
+a `.d.ts` has no bodies for a macro to be in. Pass your own as `matches` if you
+want something else.
 
 ## What gets left alone
 

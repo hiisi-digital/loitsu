@@ -79,12 +79,23 @@ export class Twins {
   readonly #cacheDir: string | undefined;
   readonly #read: Reader;
 
-  /** The newest change acknowledged per path. */
+  /**
+   * The newest change acknowledged per path, as a stamp from `#next`.
+   *
+   * Stamps come from one counter shared by every path and are never reused or
+   * restarted. A per-path counter that began again at zero after `forget` let a
+   * rebuild still in flight carry a stamp higher than everything issued after
+   * it, so a twin from before the forget could land on top of a fresh one and
+   * then hold its ground for as many edits as the counter took to climb past.
+   */
   readonly #seen = new Map<string, number>();
-  /** The generation the stored twin was built from, per path. */
-  readonly #built = new Map<string, number>();
+  /** The stamp handed to the next rebuild. Only ever climbs. */
+  #next = 0;
   readonly #twins = new Map<string, Twin>();
   readonly #failed = new Map<string, Unreadable>();
+  /** The rebuild currently running per path, so a second caller waits for it
+   * rather than reading a twin that is still being built. */
+  readonly #building = new Map<string, Promise<void>>();
 
   constructor(options: TwinsOptions) {
     this.#registry = options.registry;
@@ -115,10 +126,12 @@ export class Twins {
    * This is what a language server calls when a file is opened: nothing has
    * changed, so nothing has been rebuilt, and the twin still has to exist. */
   async get(path: string): Promise<Twin | undefined> {
-    if (!this.#seen.has(path)) {
-      this.#seen.set(path, 0);
-      await this.#rebuild(path);
-    }
+    // A rebuild already running for this path is the answer: waiting for it is
+    // what makes two requests landing together see the same twin, rather than
+    // the second one reading the map before the first has stored.
+    const running = this.#building.get(path);
+    if (running !== undefined) await running;
+    else if (!this.#seen.has(path)) await this.#acknowledge(path);
     return this.#twins.get(path);
   }
 
@@ -128,19 +141,33 @@ export class Twins {
    * stored or a newer change having overtaken it. Awaiting it is how a test, or a
    * caller that wants to act on the result, avoids guessing at a delay. */
   async changed(path: string): Promise<void> {
-    this.#seen.set(path, (this.#seen.get(path) ?? 0) + 1);
-    await this.#rebuild(path);
+    await this.#acknowledge(path);
+  }
+
+  /** Take the next stamp for a path and rebuild under it, tracking the rebuild
+   * so a concurrent `get` can wait for it. */
+  async #acknowledge(path: string): Promise<void> {
+    this.#seen.set(path, ++this.#next);
+    const running = this.#rebuild(path).finally(() => {
+      if (this.#building.get(path) === running) this.#building.delete(path);
+    });
+    this.#building.set(path, running);
+    await running;
   }
 
   /** Forget a path, because the file is gone or nobody is looking at it any more.
    *
-   * The generation is forgotten with it, so a rebuild still in flight for this
-   * path finds no record to beat and discards itself. */
+   * A rebuild still in flight keeps the stamp it took, and anything issued after
+   * this takes a higher one, so the in-flight result cannot land on top of a
+   * later twin however long it takes to arrive. */
   forget(path: string): void {
     this.#seen.delete(path);
-    this.#built.delete(path);
     this.#twins.delete(path);
     this.#failed.delete(path);
+    // A rebuild still running belongs to the incarnation being forgotten, so a
+    // later `get` must not wait for it. It keeps running and its result is
+    // refused by the stamp, which is the same answer it would get anyway.
+    this.#building.delete(path);
   }
 
   async #rebuild(path: string): Promise<void> {
@@ -156,15 +183,25 @@ export class Twins {
       return;
     }
 
-    const out = await cached(
-      text,
-      this.#against,
-      this.#registry,
-      this.#cacheDir,
-      // The path, so a `.tsx` file is parsed as one. This is the only place that
-      // knows it: `expand` sees text and nothing else.
-      path,
-    );
+    // A macro is ordinary code and ordinary code throws. Letting it out of here
+    // reaches nobody: the caller is a timer callback, so the rejection is
+    // unhandled and the process ends. The twin simply could not be built, which
+    // is what `failure` is for and is the same answer an unreadable file gets.
+    let out;
+    try {
+      out = await cached(
+        text,
+        this.#against,
+        this.#registry,
+        this.#cacheDir,
+        // The path, so a `.tsx` file is parsed as one. This is the only place that
+        // knows it: `expand` sees text and nothing else.
+        path,
+      );
+    } catch (err) {
+      this.#store(path, at, undefined, `${(err as Error).message}`);
+      return;
+    }
     this.#store(path, at, { ...out, path, generation: at }, "");
   }
 
@@ -176,15 +213,12 @@ export class Twins {
     twin: Twin | undefined,
     why: string,
   ): void {
-    // Not `>=`. An equal generation means this rebuild and the stored one saw the
-    // same change, so redoing the work cannot have found anything different, and
-    // letting it through would make two rebuilds of one change order-dependent.
-    if (at <= (this.#built.get(path) ?? -1)) return;
-    // A path forgotten while this ran has no `#seen` entry, and rebuilding it here
-    // would resurrect a file somebody deleted.
-    if (!this.#seen.has(path)) return;
+    // One comparison does both jobs. A path forgotten while this ran has no entry,
+    // so rebuilding it here would resurrect a file somebody deleted; and a stamp
+    // that is not the newest acknowledged belongs to a rebuild something has
+    // already overtaken. Stamps are unique, so equality is the only pass.
+    if (at !== this.#seen.get(path)) return;
 
-    this.#built.set(path, at);
     if (twin === undefined) {
       this.#twins.delete(path);
       this.#failed.set(path, { path, generation: at, why });
@@ -201,8 +235,11 @@ const ABORT = "abort";
 /** Whether a path is one loitsu has any business expanding. TypeScript only, and
  * not the declaration files, which carry no bodies for a macro to be written in. */
 export function interesting(path: string): boolean {
-  return (path.endsWith(".ts") || path.endsWith(".tsx")) &&
-    !path.endsWith(".d.ts");
+  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) => path.endsWith(e));
+  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>
+    path.endsWith(e)
+  );
+  return source && !declaration;
 }
 
 /** What a filesystem watch needs to keep a `Twins` current. */
@@ -216,6 +253,10 @@ export interface WatchOptions {
   /** How long to let a burst of events settle before rebuilding. An editor saving
    * one file emits several events, and rebuilding on each is work thrown away. */
   readonly settleMs?: number;
+  /** The longest a batch may be held open, however many events keep arriving. A
+   * write that never pauses for `settleMs` would otherwise never be flushed, and
+   * a formatter pass over a tree is exactly that shape. */
+  readonly maxWaitMs?: number;
   /** Which paths to expand. Defaults to `interesting`. */
   readonly matches?: (path: string) => boolean;
   /** Called after each settled batch, with the paths that were rebuilt. The hook a
@@ -235,19 +276,26 @@ export interface WatchOptions {
 export async function watch(options: WatchOptions): Promise<void> {
   const matches = options.matches ?? interesting;
   const settleMs = options.settleMs ?? 20;
+  const maxWaitMs = options.maxWaitMs ?? 200;
   const watcher = Deno.watchFs([...options.paths], { recursive: true });
 
   const stop = () => watcher.close();
   options.signal?.addEventListener(ABORT, stop, { once: true });
+  // A listener on a signal that has already aborted never runs, so without this
+  // the watcher is never closed and the loop below never ends.
+  if (options.signal?.aborted === true) stop();
 
   const pending = new Set<string>();
   // `ReturnType` rather than `number`, because the npm typescript dependency pulls
   // node's typings in and its `setTimeout` returns a `Timeout` object.
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let settling: PromiseWithResolvers<void> | undefined;
+  // When the oldest event still pending arrived, so a stream that never pauses is
+  // still flushed. Undefined when nothing is pending.
+  let oldest: number | undefined;
 
   const flush = async (): Promise<void> => {
     timer = undefined;
+    oldest = undefined;
     const batch = [...pending];
     pending.clear();
     for (const path of batch) {
@@ -255,8 +303,6 @@ export async function watch(options: WatchOptions): Promise<void> {
       else options.twins.forget(path);
     }
     await options.onBatch?.(batch);
-    settling?.resolve();
-    settling = undefined;
   };
 
   try {
@@ -265,9 +311,16 @@ export async function watch(options: WatchOptions): Promise<void> {
         if (matches(path)) pending.add(path);
       }
       if (pending.size === 0) continue;
-      settling ??= Promise.withResolvers<void>();
+      oldest ??= Date.now();
+      // Resetting the timer on every event is what makes a burst arrive as one
+      // batch. On its own it also means a burst that never pauses for `settleMs`
+      // is never flushed at all, so the wait is capped from when the batch opened.
+      const wait = Math.max(
+        0,
+        Math.min(settleMs, maxWaitMs - (Date.now() - oldest)),
+      );
       if (timer !== undefined) clearTimeout(timer);
-      timer = setTimeout(() => void flush(), settleMs);
+      timer = setTimeout(() => void flush(), wait);
     }
   } catch (err) {
     // Closing the watcher to stop it makes the loop throw, which is the ordinary
