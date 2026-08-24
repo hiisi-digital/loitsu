@@ -303,6 +303,140 @@ const PLANS: Record<string, readonly Mutation[]> = {
       to: NEVER,
     },
   ],
+  "src/watch.ts": [
+    // Everything else in the suite injects a reader, so nothing else would notice
+    // the default one going away. It is what a consumer actually gets.
+    ...ways(
+      "    this.#read = options.read ?? ((path) => Deno.readTextFile(path));",
+      [
+        "there is no default reader, so a Twins built the documented way cannot read",
+        "    this.#read = options.read!;",
+      ],
+    ),
+    // The declined `<=` to `<` mutation that used to sit here is gone with the
+    // counter it was about. Its stated reason was also wrong: two rebuilds of one
+    // path could carry the same number, because `forget` reset it. One stamp from
+    // one counter, never reused, means the guard is a single equality and every
+    // way of loosening it is reachable.
+    ...ways(
+      "    if (at !== this.#seen.get(path)) return;",
+      [
+        "the last rebuild to finish wins, whatever it saw",
+        NEVER_RETURN,
+      ],
+      [
+        "a rebuild older than the newest change still stores",
+        "    if (at > (this.#seen.get(path) ?? Infinity)) return;",
+      ],
+      [
+        "a rebuild for a forgotten path resurrects it",
+        "    if (this.#seen.has(path) && at !== this.#seen.get(path)) return;",
+      ],
+    ),
+    {
+      what: "a change does not take a new stamp, so nothing overtakes",
+      from: "    this.#seen.set(path, ++this.#next);",
+      to: "    this.#seen.set(path, this.#seen.get(path) ?? ++this.#next);",
+    },
+    {
+      what: "a second request does not wait for the build already running",
+      from: "    if (running !== undefined) await running;",
+      to: NEVER_RETURN.replace("return;", "await running;"),
+    },
+    {
+      what: "get rebuilds a path it already holds a twin for",
+      from:
+        "    else if (!this.#seen.has(path)) await this.#acknowledge(path);",
+      to: "    else await this.#acknowledge(path);",
+    },
+    {
+      what: "a forgotten path keeps waiting on the rebuild it abandoned",
+      from: "    this.#building.delete(path);",
+      to: "    /* kept */;",
+    },
+    {
+      what: "a macro that throws takes the process with it",
+      from:
+        "      this.#store(path, at, undefined, `${(err as Error).message}`);",
+      to: "      throw err;",
+    },
+    {
+      what: "an unreadable file keeps whatever twin it had",
+      from:
+        "      this.#store(path, at, undefined, (err as Error).constructor.name);",
+      to: "      return;",
+    },
+    {
+      what: "a rebuilt twin does not clear the failure before it",
+      from: "      this.#failed.delete(path);",
+      to: "      /* kept */;",
+    },
+    {
+      what: "forget leaves the generation behind",
+      from: "    this.#seen.delete(path);",
+      to: "    /* kept */;",
+    },
+    {
+      what: "the path never reaches the cache, so tsx is expanded as ts",
+      from: "        path,",
+      to: "        undefined,",
+    },
+    ...ways(
+      "  return source && !declaration;",
+      ["declaration files are expanded too", "  return source;"],
+      ["everything is interesting", "  return true;"],
+    ),
+    ...ways(
+      '  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) =>',
+      [
+        "the module extensions are ignored",
+        '  const source = [".ts", ".tsx"].some((e) =>',
+      ],
+    ),
+    ...ways(
+      '  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>',
+      [
+        "only the plain declaration form is refused",
+        '  const declaration = [".d.ts"].some((e) =>',
+      ],
+    ),
+    {
+      what: "a deleted file keeps its twin instead of being forgotten",
+      from: "      else options.twins.forget(path);",
+      to: "      else { /* kept */ }",
+    },
+    {
+      what: "a removed file is rebuilt rather than forgotten",
+      from: "      if (await exists(path)) await options.twins.changed(path);",
+      to: "      if (true) await options.twins.changed(path);",
+    },
+    {
+      what: "the filter is dropped, so every file is expanded",
+      from: "        if (matches(path)) pending.add(path);",
+      to: "        pending.add(path);",
+    },
+    {
+      what: "a signal that already aborted leaves the watch running forever",
+      from: "  if (options.signal?.aborted === true) stop();",
+      to: "  /* kept */;",
+    },
+    {
+      what: "the debounce has no ceiling, so a sustained write starves it",
+      from: "        Math.min(settleMs, maxWaitMs - (Date.now() - oldest)),",
+      to: "        settleMs,",
+    },
+    {
+      what:
+        "the batch clock is never restarted, so every later batch is instant",
+      from: "    oldest = undefined;",
+      to: "    /* kept */;",
+    },
+    {
+      what: "a batch collected at the moment of the abort is dropped",
+      from: "      await flush();",
+      to: "      /* dropped */;",
+    },
+  ],
   "src/cache.ts": [
     ...ways(
       '  const key = await keyOf(text, `${against}:${dialectOf(fileName ?? "")}`);',

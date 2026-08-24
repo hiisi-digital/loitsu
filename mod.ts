@@ -65,3 +65,13 @@ export {
   keyOf,
   VERSION as CACHE_VERSION,
 } from "./src/cache.ts";
+
+export type {
+  Reader,
+  Rebuilt,
+  Twin,
+  TwinsOptions,
+  Unreadable,
+  WatchOptions,
+} from "./src/watch.ts";
+export { interesting, Twins, watch } from "./src/watch.ts";

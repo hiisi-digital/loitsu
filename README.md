@@ -123,11 +123,61 @@ Nothing there is authoritative and none of it is meant to be committed. Losing
 the whole cache costs you some time and nothing else, and anything it can't
 verify on the way back in it throws away rather than trusts.
 
+## Keeping twins current
+
+`Twins` is the only thing in here that ever reads the source files. Everything
+else sees twins, which is the point of the whole arrangement. A checker or a
+language server is handed a file it can actually parse, never the one being
+edited.
+
+```ts
+import { Twins, watch } from "@hiisi/loitsu";
+
+const twins = new Twins({
+  registry: known,
+  against: "my-macros@1",
+  cacheDir: dir,
+});
+
+const stop = new AbortController();
+const watching = watch({ twins, paths: ["src"], signal: stop.signal });
+
+await twins.get("src/thing.ts"); // the twin, built if there isn't one yet
+
+stop.abort();
+await watching; // it resolves once the watch has actually let go
+```
+
+The rule it holds to: a twin is never older than the last change it
+acknowledged. Editors write a file several times per save, so two rebuilds for
+one path overlap fairly often, and the one that finishes last did not
+necessarily read the newest bytes. A rebuild that has been overtaken throws its
+own result away rather than storing it.
+
+Events are batched, so one save is one rebuild instead of five. A batch waits
+`settleMs` for the writing to settle, and `maxWaitMs` caps how long it may be
+held open however many events keep arriving. That cap is what keeps twins
+arriving during a formatter walking a whole tree, rather than only at the end of
+it.
+
+A file that cannot be read is ordinary halfway through a save, so it is reported
+rather than thrown. `get` and `peek` answer with nothing and `failure` says
+why.
+
+```ts
+twins.failure("src/thing.ts")?.why; // "NotFound" while the editor is mid-write
+```
+
+`interesting` is the default for deciding which paths are worth expanding. It
+takes the TypeScript sources and leaves the declaration files, since a `.d.ts`
+has no bodies for a macro to sit in. Do note that `matches` takes a predicate of
+its own if that default does not suit.
+
 ## What gets left alone
 
-A name that isn't in the registry is left exactly as written. So if you do
-happen to have an array literal standing alone as a statement, you get your code
-back untouched rather than an error about a macro you never wrote.
+A name that is not in the registry is left exactly as written. An array literal
+standing alone as a statement comes back untouched, rather than as an error
+about a macro nobody wrote.
 
 The one thing that is reported rather than ignored is an attribute as the last
 statement in a block, since it has nothing beneath it to attach to. That is
@@ -193,13 +243,12 @@ the bug you spend an afternoon on.
 The api hasn't settled and breaking changes should be expected. I'd caution
 against using this for anything serious just yet.
 
-There's no editor integration yet, and no frontends. Expansion, the map and the
-cache are here; a file watcher that keeps twins current is next, then a language
-server that serves the twin under your source uri and maps the diagnostics back,
-and after that hooking into `deno check` and friends. The intent is that it just
-works once you depend on it, with at most a line in your `deno.json` or
-`package.json`, but that isn't true yet and I'd rather say so than let you find
-out.
+There's no editor integration yet, and no frontends. Expansion, the map, the
+cache and the watcher are here; a language server that serves the twin under
+your source uri and maps the diagnostics back is the next piece, and after that
+hooking into `deno check` and friends. The intent is that it just works once you
+depend on it, with at most a line in your `deno.json` or `package.json`, but
+that isn't true yet and I'd rather say so than let you find out.
 
 Expansion is whole file at a time, not incremental. Fine at the sizes this has
 been used on, and would want attention before it isn't.
