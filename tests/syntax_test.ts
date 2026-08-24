@@ -12,7 +12,7 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import ts from "typescript";
 import { registry } from "../src/macro.ts";
-import { type Use, uses } from "../src/syntax.ts";
+import { offsetIn, type Use, uses } from "../src/syntax.ts";
 
 /** A registry that knows `cfg` as an attribute and `env` as a call. */
 const known = registry([
@@ -109,4 +109,45 @@ Deno.test("the harness can fail, so the laws above mean something", () => {
   // must-not law above and half the must laws would be the only thing catching it.
   assert(find(`[cfg(deno)]\nexport function f(): void {}\n`).length > 0);
   assertEquals(find(``).length, 0);
+});
+
+Deno.test("offsets are UTF-16 code units, which is not what a byte count gives", () => {
+  // The type was called `ByteOffset` and its doc said bytes, and every value in
+  // it was a UTF-16 code unit. Nothing failed, because nothing here had ever been
+  // asked about a non-ascii file. An implementer reading that name and reaching
+  // for a `TextEncoder` would move every position in every such file.
+  const source = `const \u65e5\u672c = 1;\n[cfg(deno)]\nfunction f() {}\n`;
+  const utf16 = source.indexOf("[cfg");
+  const utf8 = new TextEncoder().encode(source.slice(0, utf16)).length;
+  assertEquals(utf16, 14);
+  assertEquals(utf8, 18, "and the two really do differ on this text");
+
+  const [use] = find(source);
+  assert(use !== undefined && use.form === "attribute");
+  assertEquals(
+    use.start,
+    utf16,
+    "the recogniser counts the units a string index counts",
+  );
+  assertEquals(
+    source.slice(use.start, use.end),
+    "[cfg(deno)]",
+    "and slicing the source at it gives back the invocation",
+  );
+});
+
+Deno.test("an offset is checked against the text's own length in the same units", () => {
+  const text = "\u{1f388}\u{1f388}"; // two code points, four code units
+  assertEquals(offsetIn(text, 4), 4, "the very end is inside");
+  assertThrows(
+    () => offsetIn(text, 5),
+    RangeError,
+    "outside a source text",
+    "one past the end is not, even though the byte length is eight",
+  );
+  assertEquals(
+    new TextEncoder().encode(text).length,
+    8,
+    "the byte length that would have let 5 through",
+  );
 });

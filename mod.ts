@@ -32,9 +32,9 @@ export { registry } from "./src/macro.ts";
 
 export type {
   AttributeUse,
-  ByteOffset,
   CallUse,
   DanglingAttribute,
+  Offset,
   Use,
 } from "./src/syntax.ts";
 export type { Dialect } from "./src/syntax.ts";
