@@ -107,3 +107,34 @@ Deno.test("registering against a config that exports nothing usable is refused",
     await Deno.remove(root, { recursive: true });
   }
 });
+
+Deno.test("a config that cannot be read is not reported as one that is not there", async () => {
+  const root = await Deno.makeTempDir({ prefix: "loitsu_perm_" });
+  try {
+    const shut = join(root, "shut");
+    await Deno.mkdir(shut);
+    await Deno.writeTextFile(join(shut, CONFIG), "export default {};\n");
+    // the control first: while it is readable, it is found
+    assertEquals(await rootFrom(shut), resolve(shut));
+
+    await Deno.chmod(shut, 0o000);
+    try {
+      // a permission error is not absence. Climbing past it and reporting "no
+      // config above here" says the file is missing when it is right there.
+      let said: unknown;
+      try {
+        await rootFrom(shut);
+      } catch (why) {
+        said = why;
+      }
+      assert(
+        said !== undefined,
+        "a stat that failed for a reason other than absence has to reach the caller",
+      );
+    } finally {
+      await Deno.chmod(shut, 0o755);
+    }
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});

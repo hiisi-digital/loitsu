@@ -9,7 +9,7 @@
  * `install` takes a registry, which means a project using it writes a small
  * module of its own that imports its macros and calls it, and then names that
  * module wherever its runtime reads one. That module is the same three lines in
- * every project, and writing it is the step that makes this not turnkey.
+ * every project, and writing it is a step nobody should have to take.
  *
  * So this is that module. It finds the project the way the command line does,
  * from `loitsu.config.ts` upward from the working directory, imports it, and
@@ -32,13 +32,107 @@
  * @module
  */
 
-import { dirname, join, resolve } from "@std/path";
 import { install, type Installed } from "./src/install.ts";
 import { CONFIG, project } from "./cli/project.ts";
+
+/* Path handling, inline, rather than from `@std/path`.
+ *
+ * This is the first module a runtime loads, before any of its own resolution is
+ * set up, and node cannot resolve a bare specifier in a file loaded directly by
+ * path. A preload that depends on the resolver working is a preload that fails
+ * where it is least able to say why.
+ *
+ * What is needed is small enough to be worth having here: joining two segments,
+ * taking a parent, and making a relative path absolute. */
+
+/** One path from two segments, with a single separator between them. */
+const joined = (a: string, b: string): string =>
+  `${a.replace(/[\\/]+$/, "")}/${b}`;
+
+/** The parent of a path, and a fixpoint at whatever passes for a root. */
+function parentOf(path: string): string {
+  const at = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  // at 0 the parent is the root itself, and a windows drive keeps its colon
+  if (at <= 0) return path.startsWith("/") ? "/" : path;
+  const up = path.slice(0, at);
+  return /^[A-Za-z]:$/.test(up) ? `${up}\\` : up;
+}
+
+/** An absolute path, resolved against where the process is standing. */
+const absolute = (path: string): string =>
+  path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)
+    ? path.replace(/[\\/]+$/, "") || "/"
+    : joined(whereWeAre(), path).replace(/\/\.$/, "");
 
 /** Why a runtime could not be set up. */
 export class RegisterError extends Error {
   override readonly name = "RegisterError";
+}
+
+/** What this module needs of a runtime, which is two things.
+ *
+ * Reached through the global rather than imported, for the reason `install.ts`
+ * gives about `node:module`: naming a specifier at the top of this file makes
+ * the file unloadable anywhere that specifier does not resolve. This module is
+ * loaded by node and by bun, where `Deno` is not defined, and by deno, where
+ * `node:fs` is. Neither may be named unconditionally. */
+interface HasDeno {
+  Deno: {
+    cwd(): string;
+    stat(path: string): Promise<unknown>;
+    errors: { NotFound: new (...args: never[]) => Error };
+  };
+}
+interface HasProcess {
+  process: {
+    cwd(): string;
+    getBuiltinModule?(name: string): unknown;
+  };
+}
+
+/** Where the process is standing, on whichever runtime is running this. */
+function whereWeAre(): string {
+  const deno = (globalThis as Partial<HasDeno>).Deno;
+  if (deno !== undefined) return deno.cwd();
+  const running = (globalThis as Partial<HasProcess>).process;
+  if (running?.cwd !== undefined) return running.cwd();
+  throw new RegisterError(
+    "this runtime reports neither Deno nor process, so there is no working " +
+      "directory to search from. Pass one to `register` instead",
+  );
+}
+
+/** Whether a path is there, and a refusal that is not "it is not there". */
+async function present(path: string): Promise<boolean> {
+  const deno = (globalThis as Partial<HasDeno>).Deno;
+  if (deno !== undefined) {
+    try {
+      await deno.stat(path);
+      return true;
+    } catch (why) {
+      // only absence means keep climbing. A permission error is not absence, and
+      // reporting it as one says the config is missing when it is right there.
+      if (why instanceof deno.errors.NotFound) return false;
+      throw why;
+    }
+  }
+
+  const fs = (globalThis as Partial<HasProcess>).process?.getBuiltinModule?.(
+    "node:fs/promises",
+  ) as { stat(p: string): Promise<unknown> } | undefined;
+  if (fs === undefined) {
+    throw new RegisterError(
+      "this runtime has neither Deno nor node:fs/promises, so nothing here can " +
+        "look for a config",
+    );
+  }
+  try {
+    await fs.stat(path);
+    return true;
+  } catch (why) {
+    if ((why as { code?: string }).code === "ENOENT") return false;
+    throw why;
+  }
 }
 
 /**
@@ -48,16 +142,12 @@ export class RegisterError extends Error {
  * happens to be standing and a project's root is not usually that place.
  */
 export async function rootFrom(from: string): Promise<string | undefined> {
-  let here = resolve(from);
+  let here = absolute(from);
   for (;;) {
-    try {
-      await Deno.stat(join(here, CONFIG));
-      return here;
-    } catch {
-      const up = dirname(here);
-      if (up === here) return undefined;
-      here = up;
-    }
+    if (await present(joined(here, CONFIG))) return here;
+    const up = parentOf(here);
+    if (up === here) return undefined;
+    here = up;
   }
 }
 
@@ -68,12 +158,14 @@ export async function rootFrom(from: string): Promise<string | undefined> {
  * itself can await it and know when it finished. Importing for the side effect
  * cannot be awaited, which is fine for a preload and wrong for anything else.
  */
-export async function register(from: string = Deno.cwd()): Promise<Installed> {
+export async function register(
+  from: string = whereWeAre(),
+): Promise<Installed> {
   const root = await rootFrom(from);
   if (root === undefined) {
     throw new RegisterError(
       `no ${CONFIG} at ${
-        resolve(from)
+        absolute(from)
       } or above it, so there are no macros to install`,
     );
   }
@@ -88,12 +180,8 @@ export async function register(from: string = Deno.cwd()): Promise<Installed> {
   });
 }
 
-// The side effect this module exists for. A preload is imported and never
-// called, so the work has to happen here rather than waiting to be asked.
-if (import.meta.main !== true) {
-  await register().catch((why: unknown) => {
-    console.error(
-      `loitsu: ${why instanceof Error ? why.message : String(why)}`,
-    );
-  });
-}
+// No side effect here. Importing `rootFrom` or `register` for their own sake
+// should not walk the filesystem to the root and print a complaint, which is
+// what this file did: the suite printed one on every run, from a directory that
+// is not a project. The preload that does run on import is `preload.ts`, one
+// file over, and that is the one a runtime is pointed at.

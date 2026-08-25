@@ -71,6 +71,14 @@ The permissions are the ones it needs and no more. It reads your sources, writes
 the twins, runs the type checker or the language server you point it at, and
 reads the environment those want.
 
+On node and bun, where the expansion goes in front of the loader instead:
+
+```bash
+npx jsr add @hiisi/loitsu
+node --import @hiisi/loitsu/preload app.js
+bun --preload @hiisi/loitsu/preload app.ts
+```
+
 ## The command
 
 Three verbs, and a project says where its macros are in a `loitsu.config.ts` at
@@ -347,18 +355,17 @@ On node and bun the expansion goes in front of the loader, and the line that
 puts it there names a module that already exists:
 
 ```bash
-node --import loitsu/register app.js
-bun --preload loitsu/register app.ts
+npx jsr add @hiisi/loitsu
+node --import @hiisi/loitsu/preload app.js
+bun --preload @hiisi/loitsu/preload app.ts
 ```
 
-Or in `package.json`, so nobody has to remember the flag:
-
-```json
-{ "imports": { "#loitsu": "loitsu/register" } }
-```
-
-`register` finds your `loitsu.config.ts` the way the command does, upward from
+`preload` finds your `loitsu.config.ts` the way the command does, upward from
 where you are standing, and installs the macros it names. Nothing to write.
+
+There is no way to move that flag into `package.json`. Its `imports` field is a
+subpath map rather than a preload hook, and a static import in your own source
+is already too late, for the reason just below.
 
 A hook reaches what is loaded after it, so a module imported alongside the one
 that installs is already resolved by the time it runs. Your program has to come

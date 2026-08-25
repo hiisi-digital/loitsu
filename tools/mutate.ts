@@ -1737,17 +1737,20 @@ ${DROP_TEMP}
   ],
   "register.ts": [
     ...ways(
-      "      const up = dirname(here);\n      if (up === here) return undefined;",
+      "    const up = parentOf(here);\n    if (up === here) return undefined;",
       [
-        "the search climbs past the root rather than stopping at it",
-        "      const up = dirname(here);\n      if (false) return undefined;",
+        // terminating on purpose. Removing the stop condition altogether makes
+        // the search spin, and a suite killed for spinning has asserted nothing,
+        // so it is a weaker arm than one a test can actually catch.
+        "reaching the root reports the root rather than reporting nothing",
+        "    const up = parentOf(here);\n    if (up === here) return here;",
       ],
     ),
     ...ways(
-      "      return here;",
+      "    if (await present(joined(here, CONFIG))) return here;",
       [
         "the directory holding the config is not the one reported",
-        "      return dirname(here);",
+        "    if (await present(joined(here, CONFIG))) return parentOf(here);",
       ],
     ),
     ...ways(
@@ -1755,6 +1758,20 @@ ${DROP_TEMP}
       [
         "a tree with no project is set up against nothing rather than refused",
         "  if (false) {",
+      ],
+    ),
+    ...ways(
+      "  if (deno !== undefined) return deno.cwd();",
+      [
+        "the working directory is asked of Deno on every runtime",
+        "  return (globalThis as { Deno: { cwd(): string } }).Deno.cwd();",
+      ],
+    ),
+    ...ways(
+      "      if (why instanceof deno.errors.NotFound) return false;\n      throw why;",
+      [
+        "a permission error is reported as the config being absent",
+        "      return false;",
       ],
     ),
   ],
@@ -1829,13 +1846,18 @@ const run = async (): Promise<number> => {
 
   try {
     const { code, signal } = await child.status;
-    // killed for taking too long counts as broken, which it is: a suite that
-    // will not finish has noticed the mutation in the loudest way available
-    return signal !== null ? 1 : code;
+    // A kill is not a catch and must not be printed as one. A suite that never
+    // returned asserted nothing, so counting it beside a real failure inflates
+    // the only number this tool produces.
+    if (signal !== null) return TIMED_OUT;
+    return code;
   } finally {
     clearTimeout(timer);
   }
 };
+
+/** What `run` reports when the suite had to be killed rather than finishing. */
+const TIMED_OUT = -1;
 
 // The baseline, because every mutation is reported caught when the suite is already
 // failing, and the run then looks like a clean sweep. This cost an afternoon once.
@@ -1858,34 +1880,44 @@ const LOCK = Deno.env.get("MUTATE_LOCK") ?? ".mutate.lock";
 try {
   await Deno.writeTextFile(LOCK, `${Deno.pid}\n`, { createNew: true });
 } catch (err) {
-  // A `finally` does not run when the process is killed, and a run interrupted
-  // while a mutation is in the file leaves that mutation in the source. It looks
-  // like an edit somebody made, and the next run reports the suite already red
-  // rather than saying why. So the source goes back on the way out too.
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    Deno.addSignalListener(signal, () => {
-      Deno.writeTextFileSync(target, original);
-      // and the lock, which is the same defect one layer up: a run killed while
-      // holding it leaves every later run refusing to start
-      try {
-        Deno.removeSync(LOCK);
-      } catch {
-        // already gone, which is fine
-      }
-      Deno.exit(130);
-    });
-  }
   if (!(err instanceof Deno.errors.AlreadyExists)) throw err;
   console.error(
     `${LOCK} is held, so a mutation run is already editing the tree. Wait for it,`,
   );
   console.error("or delete the lock if nothing is running.");
+  // and nothing is put back here. This process took no lock and made no
+  // mutation, so removing either would be undoing somebody else's work.
   Deno.exit(3);
 }
 
 const original = await Deno.readTextFile(target);
 
+/* Put the source and the lock back when the process is killed.
+ *
+ * A `finally` does not run on a signal, so a run interrupted while a mutation is
+ * in the file leaves that mutation in the source and the lock on disk. The
+ * mutation reads as an edit somebody made and the next run reports the suite
+ * already red rather than saying why.
+ *
+ * This has to sit here, after the lock was taken and after `original` was read.
+ * An earlier version of it was inside the `catch` above, which is the one path
+ * where this process holds neither: it never registered on the path that
+ * mutates, it would have read `original` before its declaration, and it would
+ * have deleted a lock belonging to another running process. */
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  Deno.addSignalListener(signal, () => {
+    Deno.writeTextFileSync(target, original);
+    try {
+      Deno.removeSync(LOCK);
+    } catch {
+      // already gone, which is fine
+    }
+    Deno.exit(130);
+  });
+}
+
 const survived: string[] = [];
+const hung: string[] = [];
 try {
   for (const m of plan) {
     if (!original.includes(m.from)) {
@@ -1897,7 +1929,12 @@ try {
     await Deno.writeTextFile(target, original.replace(m.from, m.to));
     const code = await run();
     if (code === 0) survived.push(m.what);
-    console.log(`${code === 0 ? "SURVIVED" : "caught  "}  ${m.what}`);
+    if (code === TIMED_OUT) hung.push(m.what);
+    console.log(
+      `${
+        code === 0 ? "SURVIVED" : code === TIMED_OUT ? "TIMEOUT " : "caught  "
+      }  ${m.what}`,
+    );
   }
 } finally {
   await Deno.writeTextFile(target, original);
@@ -1905,4 +1942,14 @@ try {
 }
 
 console.log(`\n${survived.length} survived of ${plan.length}`);
+// said separately, because a suite that had to be killed asserted nothing and
+// counting it as a catch inflates the one number this tool produces
+if (hung.length > 0) {
+  console.error(
+    `${hung.length} of them never finished and were killed at ${
+      PATIENCE / 1000
+    }s, which is not the same as being caught:`,
+  );
+  for (const what of hung) console.error(`  ${what}`);
+}
 if (survived.length > 0) Deno.exit(1);

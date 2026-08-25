@@ -57,7 +57,7 @@ const SWEEP: readonly (readonly [string, readonly string[]])[] = [
     "tests/untested_paths_test.ts",
   ]],
   ["cli/lsp.ts", ["tests/lsp_test.ts"]],
-  ["register.ts", ["tests/register_test.ts"]],
+  ["register.ts", ["tests/register_test.ts", "tests/runtimes_test.ts"]],
   ["src/version.ts", ["tests/version_test.ts"]],
 ];
 
@@ -126,11 +126,10 @@ for (const [source, suites] of SWEEP) {
 console.log(
   `\n${survived} survived of ${mutations} across ${counted} plans`,
 );
-if (counted !== SWEEP.length) {
-  console.error(
-    `${SWEEP.length - counted} of ${SWEEP.length} plans produced no total`,
-  );
-}
+// not a branch of its own: `broke` is set on exactly the paths that skip the
+// count, so this said the same thing twice and the second saying was after the
+// first had already exited
+
 if (broke) {
   console.error("\nat least one plan did not run; nothing here is a result");
   Deno.exit(2);

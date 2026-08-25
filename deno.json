@@ -7,10 +7,11 @@
     "./syntax": "./src/syntax.ts",
     "./macro": "./src/macro.ts",
     "./cli": "./cli/mod.ts",
-    "./register": "./register.ts"
+    "./register": "./register.ts",
+    "./preload": "./preload.ts"
   },
   "tasks": {
-    "check": "deno check mod.ts cli/mod.ts",
+    "check": "deno check mod.ts cli/mod.ts register.ts preload.ts",
     "test": "deno test --allow-read --allow-env --allow-sys --allow-run --unstable-worker-options --allow-write=$TMPDIR,/tmp,/private/tmp,/var/folders,/private/var/folders",
     "lint": "deno run -A gate.ts",
     "mutate": "deno run -A tools/mutate.ts",
@@ -30,6 +31,7 @@
     "include": [
       "mod.ts",
       "register.ts",
+      "preload.ts",
       "src/",
       "cli/",
       "README.md",
