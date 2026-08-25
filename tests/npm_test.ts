@@ -131,31 +131,55 @@ async function aFile(dir: string): Promise<string> {
   return path;
 }
 
+Deno.test("the installed command runs from the path npm puts it on", async () => {
+  if (!await have("node")) {
+    console.warn("node is not on this machine; nothing was checked here");
+    return;
+  }
+  const dir = await consumer();
+
+  // Executed rather than passed to a runtime, because that is what a shell does
+  // when somebody types the command. npm writes `.bin/loitsu` as a symlink and
+  // the shebang sends it to node, so this is the path behind `npm install -g`,
+  // `bun install -g` and `npx` alike: which package manager installed it does
+  // not decide which runtime runs it.
+  const bin = join(dir, "node_modules", ".bin", "loitsu");
+  const done = await ran(bin, ["--version"], dir);
+
+  assertEquals(done.code, 0, `the command failed:\n${done.out}`);
+  assertStringIncludes(
+    done.out,
+    VERSION,
+    `the command printed no version, which is what an entry guard comparing ` +
+      `import.meta.url against a symlinked argv[1] does:\n${done.out}`,
+  );
+});
+
+Deno.test("the installed command runs when bun is the one running it", async () => {
+  if (!await have("bun")) {
+    console.warn("bun is not on this machine; nothing was checked here");
+    return;
+  }
+  const dir = await consumer();
+
+  // bun executing the file, which is `bun run` and `bunx --bun`. The test above
+  // cannot stand in for this one and the reverse is also true: `.bin/loitsu`
+  // carries a node shebang, so executing it runs node whoever installed it, and
+  // a suite that reached both through that shebang would be one test written
+  // twice under two names.
+  //
+  // Measured on the entry point this replaced: node printed nothing through the
+  // shebang and bun printed the version when handed the same file, because bun
+  // resolves the link before setting `argv[1]` and node does not. So the two
+  // runtimes really do disagree here, and only one of them disagreed loudly.
+  const bin = join(dir, "node_modules", "loitsu", "esm", "bin.js");
+  const done = await ran("bun", [bin, "--version"], dir);
+
+  assertEquals(done.code, 0, `the command failed under bun:\n${done.out}`);
+  assertStringIncludes(done.out, VERSION, done.out);
+});
+
 for (const runtime of ["node", "bun"] as const) {
-  Deno.test(`the installed command runs on ${runtime}`, async () => {
-    if (!await have(runtime)) {
-      console.warn(
-        `${runtime} is not on this machine; nothing was checked here`,
-      );
-      return;
-    }
-    const dir = await consumer();
-
-    // Through the symlink npm puts in `.bin`, which is every documented install
-    // path: `npm install -g`, `bun install -g`, `npx`, `bunx`. Running the file
-    // directly is not the same test and passed the whole time this was broken.
-    const bin = join(dir, "node_modules", ".bin", "loitsu");
-    const done = await ran(bin, ["--version"], dir);
-
-    assertEquals(done.code, 0, `the command failed:\n${done.out}`);
-    assertStringIncludes(
-      done.out,
-      VERSION,
-      `the command printed no version through the ${runtime} bin, which is what ` +
-        `an entry guard comparing against a symlinked argv[1] does:\n${done.out}`,
-    );
-  });
-
   Deno.test(`a Twins built with no reader works on ${runtime}`, async () => {
     if (!await have(runtime)) {
       console.warn(
