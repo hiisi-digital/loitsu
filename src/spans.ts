@@ -61,17 +61,41 @@ export interface SpanTable {
 export function spanning(spans: readonly Span[]): SpanTable {
   let reach = 0;
   for (const span of spans) {
+    // Before anything is compared, because every comparison below short-circuits on
+    // a value that is not a number and lets the span through. That matters because
+    // a table does not only arrive from code in here: `cache.ts` rebuilds one out of
+    // JSON and calls this the thing that makes a stored entry no more trusted than
+    // any other input. A hand-edited entry carrying `"outStart": "0"` is ordinary
+    // JSON, and unguarded it produced a lookup returning the string "03" out of a
+    // function declared to return a number.
+    for (
+      const [what, value] of [
+        ["outStart", span.outStart],
+        ["length", span.length],
+        ["inStart", span.inStart],
+      ] as const
+    ) {
+      if (!Number.isInteger(value)) {
+        throw new RangeError(
+          `a span's ${what} is ${
+            typeof value === "string" ? JSON.stringify(value) : String(value)
+          }, which is not a whole number of bytes`,
+        );
+      }
+    }
     if (span.length <= 0) {
       throw new RangeError(`a span covering ${span.length} bytes maps nothing`);
     }
     if (span.outStart < reach) {
       throw new RangeError(
-        `a span starting at ${span.outStart} overlaps the one ending at ${reach}, `
-          + "so a position inside the overlap has two answers",
+        `a span starting at ${span.outStart} overlaps the one ending at ${reach}, ` +
+          "so a position inside the overlap has two answers",
       );
     }
     if (span.inStart < 0) {
-      throw new RangeError(`a span from source offset ${span.inStart} starts before the text`);
+      throw new RangeError(
+        `a span from source offset ${span.inStart} starts before the text`,
+      );
     }
     reach = span.outStart + span.length;
   }
@@ -80,7 +104,9 @@ export function spanning(spans: readonly Span[]): SpanTable {
 
 /** The identity table for a transform that moved nothing, over a text of `length` bytes. */
 export function identity(length: number): SpanTable {
-  return length === 0 ? { spans: [] } : spanning([{ outStart: 0, length, inStart: 0 }]);
+  return length === 0
+    ? { spans: [] }
+    : spanning([{ outStart: 0, length, inStart: 0 }]);
 }
 
 /**
@@ -92,7 +118,10 @@ export function identity(length: number): SpanTable {
  * be a guess wearing a citation, so it is refused instead and the caller decides
  * what to say.
  */
-export function sourceOffset(table: SpanTable, out: number): number | undefined {
+export function sourceOffset(
+  table: SpanTable,
+  out: number,
+): number | undefined {
   const { spans } = table;
   let low = 0;
   let high = spans.length - 1;
@@ -104,4 +133,160 @@ export function sourceOffset(table: SpanTable, out: number): number | undefined 
     else return span.inStart + (out - span.outStart);
   }
   return undefined;
+}
+
+/** A contiguous run of bytes, in whichever text the function taking it names. */
+export interface Run {
+  readonly start: number;
+  readonly length: number;
+}
+
+/**
+ * Every place an authored offset ended up, in ascending output order.
+ *
+ * Plural, and that is the whole point. An expansion is a list of items, so a
+ * macro that derives something returns the item it was handed alongside what it
+ * derived, and the derived part names the authored symbol. One authored offset
+ * then has several images, and a singular answer edits one of them and leaves
+ * the rest, which is a partial rename that nothing reports.
+ *
+ * Empty is a real answer, the mirror of `undefined` from {@link sourceOffset}:
+ * an authored offset inside something a macro deleted has no image, and a caller
+ * that edits nothing there is correct.
+ *
+ * Ascending, and without sorting: {@link spanning} refuses a span starting before
+ * the previous one ends, so the table is ordered by output position and walking it
+ * produces images in that order already. A sort here would be unreachable, and an
+ * unreachable sort is a claim no test can hold.
+ *
+ * Linear in the number of spans, because the table is ordered by output position
+ * and this asks the other question. Building a second index would be the fix if
+ * it ever mattered, and per file it does not.
+ */
+export function outputOffsets(table: SpanTable, source: number): number[] {
+  const out: number[] = [];
+  for (const span of table.spans) {
+    const delta = source - span.inStart;
+    if (delta >= 0 && delta < span.length) out.push(span.outStart + delta);
+  }
+  return out;
+}
+
+/**
+ * The authored runs an output run covers, in order, with nothing inferred.
+ *
+ * A run rather than a range, and a list rather than one answer, because an output
+ * run routinely covers bytes that came from nowhere. `greet__deno` in a twin is
+ * five authored bytes followed by six the expander invented, so the honest answer
+ * is one run of five, not a range of eleven and not a refusal.
+ *
+ * Returning a hull instead would be a guess in exactly the case that matters: two
+ * authored runs with a gap between them have no single range containing only
+ * them, and a caller handed one would edit the text in between.
+ */
+export function sourceRuns(table: SpanTable, out: Run): Run[] {
+  if (out.length <= 0) return [];
+  const end = out.start + out.length;
+  const runs: Run[] = [];
+  for (const span of table.spans) {
+    const spanEnd = span.outStart + span.length;
+    if (spanEnd <= out.start) continue;
+    if (span.outStart >= end) break;
+    const from = Math.max(span.outStart, out.start);
+    const to = Math.min(spanEnd, end);
+    runs.push({
+      start: span.inStart + (from - span.outStart),
+      length: to - from,
+    });
+  }
+  // In authored order, which is not output order: a macro may reorder what it
+  // was handed, and the table is ordered by output position. Merging without
+  // sorting would then leave two halves of one authored word unjoined, which
+  // reads as two separate authored regions and is a different claim.
+  runs.sort((a, b) => a.start - b.start);
+  return merge(runs);
+}
+
+/**
+ * Every output run an authored run maps to, in ascending output order.
+ *
+ * The plural counterpart of {@link sourceRuns}, and what a rename is answered
+ * with: the authored range of a name goes in, and every place the expansion
+ * wrote that name comes out, so an edit can be applied to all of them at once.
+ *
+ * Ascending for the same reason {@link outputOffsets} is, and with no sort for
+ * the same reason. {@link sourceRuns} does sort, because its output is in
+ * authored order and the table is not.
+ */
+export function outputRuns(table: SpanTable, source: Run): Run[] {
+  if (source.length <= 0) return [];
+  const end = source.start + source.length;
+  const runs: Run[] = [];
+  for (const span of table.spans) {
+    const spanEnd = span.inStart + span.length;
+    if (spanEnd <= source.start || span.inStart >= end) continue;
+    const from = Math.max(span.inStart, source.start);
+    const to = Math.min(spanEnd, end);
+    runs.push({
+      start: span.outStart + (from - span.inStart),
+      length: to - from,
+    });
+  }
+  return merge(runs);
+}
+
+/** Join runs that touch, so a table split for its own reasons does not leak that
+ * split into an answer. Two spans describing adjacent bytes of one authored word
+ * are one run to anybody asking. */
+function merge(runs: readonly Run[]): Run[] {
+  const out: Run[] = [];
+  for (const run of runs) {
+    const last = out[out.length - 1];
+    if (last && last.start + last.length === run.start) {
+      out[out.length - 1] = {
+        start: last.start,
+        length: last.length + run.length,
+      };
+    } else out.push(run);
+  }
+  return out;
+}
+
+/**
+ * Chain two tables, so a position in the final text names a position in the first.
+ *
+ * `first` maps an intermediate text back to what was authored; `second` maps the
+ * final text back to that intermediate. The result maps the final text back to
+ * what was authored, which is what an expander doing one macro per round needs
+ * after the second round.
+ *
+ * A byte survives only where both tables carry it. A run the second table maps
+ * into a region the first does not cover came from text the first round
+ * generated, so it has no authored origin and gets none here: dropping it is the
+ * whole point, and inventing one would put a diagnostic on a line somebody never
+ * wrote.
+ *
+ * Composition is not associative-by-luck and is not commutative. `compose(a, b)`
+ * reads right to left, the way function composition does.
+ */
+export function compose(first: SpanTable, second: SpanTable): SpanTable {
+  const out: Span[] = [];
+  for (const late of second.spans) {
+    // Where this run of the final text sits in the intermediate, and then which of
+    // the intermediate's own runs it overlaps. Both tables are ordered by their
+    // output, and `late` is ordered against the final text, so the result comes out
+    // ordered too and needs no sort.
+    const from = late.inStart, to = late.inStart + late.length;
+    for (const early of first.spans) {
+      const lo = Math.max(early.outStart, from);
+      const hi = Math.min(early.outStart + early.length, to);
+      if (lo >= hi) continue;
+      out.push({
+        outStart: late.outStart + (lo - from),
+        length: hi - lo,
+        inStart: early.inStart + (lo - early.outStart),
+      });
+    }
+  }
+  return spanning(out);
 }

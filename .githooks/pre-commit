@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# The gate. A commit that does not pass it does not happen.
+#
+# Deliberately harsher than the code was when this landed: every finding a
+# linter is at all sure of is an error, and tests are held to the same bar as
+# source. If this is in your way, the answer is the finding rather than the
+# hook.
+#
+# `--no-verify` exists and using it is a decision to put something in the
+# history that the gate refused.
+set -euo pipefail
+
+echo "gate: type check"
+deno check mod.ts
+
+echo "gate: tests"
+deno task test
+
+echo "gate: conventions"
+deno task lint
+
+echo "gate: passed"

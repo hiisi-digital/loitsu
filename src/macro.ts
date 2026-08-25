@@ -55,7 +55,9 @@ export interface Item {
  * between a macro system and a preprocessor, and it is why the arguments are a
  * tuple parameter rather than `unknown[]`.
  */
-export interface AttributeMacro<Args extends readonly unknown[] = readonly unknown[]> {
+export interface AttributeMacro<
+  Args extends readonly unknown[] = readonly unknown[],
+> {
   readonly kind: "attribute";
   readonly name: string;
   /**
@@ -75,7 +77,9 @@ export interface AttributeMacro<Args extends readonly unknown[] = readonly unkno
  * rather than breaking, and that is a property worth keeping rather than an
  * accident.
  */
-export interface FunctionMacro<Args extends readonly unknown[] = readonly unknown[]> {
+export interface FunctionMacro<
+  Args extends readonly unknown[] = readonly unknown[],
+> {
   readonly kind: "function";
   readonly name: string;
   /** Produce the expression that replaces the call. */
@@ -109,8 +113,8 @@ export function registry(macros: readonly Macro[]): Registry {
     const into = macro.kind === "attribute" ? attributes : functions;
     if (into.has(macro.name)) {
       throw new Error(
-        `two ${macro.kind} macros are named ${macro.name}; a call site names one macro `
-          + "and there would be no way to say which",
+        `two ${macro.kind} macros are named ${macro.name}; a call site names one macro ` +
+          "and there would be no way to say which",
       );
     }
     if (macro.kind === "attribute") attributes.set(macro.name, macro);

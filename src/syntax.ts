@@ -26,15 +26,25 @@
 
 import ts from "typescript";
 
-/** A byte offset into one source text, branded so offsets do not cross files. */
-export type ByteOffset = number & { readonly __byteOffset: unique symbol };
+/**
+ * An offset into one source text, branded so offsets do not cross files.
+ *
+ * Counted in UTF-16 code units, which is what a JavaScript string index is and
+ * what TypeScript reports from `getStart`. It is not a byte count and the two
+ * differ the moment the text stops being ascii: in `const \u65e5\u672c = 1;` the
+ * name ends at offset 8 and at byte 12. Converting to bytes anywhere would move
+ * every position in every non-ascii file.
+ */
+export type Offset = number & { readonly __offset: unique symbol };
 
 /** Assert an offset belongs to `text`, which is the only way to make one. */
-export function offsetIn(text: string, at: number): ByteOffset {
+export function offsetIn(text: string, at: number): Offset {
   if (!Number.isInteger(at) || at < 0 || at > text.length) {
-    throw new RangeError(`offset ${at} is outside a source text of ${text.length} bytes`);
+    throw new RangeError(
+      `offset ${at} is outside a source text of ${text.length} characters`,
+    );
   }
-  return at as ByteOffset;
+  return at as Offset;
 }
 
 /** One `[name(...args)]` and the statement it attaches to. */
@@ -42,8 +52,8 @@ export interface AttributeUse {
   readonly form: "attribute";
   readonly name: string;
   readonly args: readonly ts.Expression[];
-  readonly start: ByteOffset;
-  readonly end: ByteOffset;
+  readonly start: Offset;
+  readonly end: Offset;
   /** The statement below it. */
   readonly target: ts.Statement;
 }
@@ -53,8 +63,8 @@ export interface CallUse {
   readonly form: "call";
   readonly name: string;
   readonly args: readonly ts.Expression[];
-  readonly start: ByteOffset;
-  readonly end: ByteOffset;
+  readonly start: Offset;
+  readonly end: Offset;
   readonly node: ts.CallExpression;
 }
 
@@ -62,14 +72,25 @@ export interface CallUse {
 export interface DanglingAttribute {
   readonly form: "dangling";
   readonly name: string;
-  readonly start: ByteOffset;
-  readonly end: ByteOffset;
+  readonly start: Offset;
+  readonly end: Offset;
 }
 
+/**
+ * One place a macro is used, in whichever of the three shapes it took.
+ *
+ * An attribute with something beneath it to expand, a call, or an attribute
+ * with nothing beneath it. The last is kept rather than dropped because an
+ * attribute expanding into nothing is a mistake worth reporting, and a scanner
+ * that discarded it would have nothing to report it from.
+ */
 export type Use = AttributeUse | CallUse | DanglingAttribute;
 
 /** The callee's name, when the expression is a call to a plain identifier. */
-function calleeName(call: ts.CallExpression, src: ts.SourceFile): string | undefined {
+function calleeName(
+  call: ts.CallExpression,
+  src: ts.SourceFile,
+): string | undefined {
   const callee = call.expression;
   const bare = ts.isNonNullExpression(callee) ? callee.expression : callee;
   return ts.isIdentifier(bare) ? bare.getText(src) : undefined;
@@ -79,9 +100,35 @@ function calleeName(call: ts.CallExpression, src: ts.SourceFile): string | undef
 function asAttributeCall(s: ts.Statement): ts.CallExpression | undefined {
   if (!ts.isExpressionStatement(s)) return undefined;
   const e = s.expression;
-  if (!ts.isArrayLiteralExpression(e) || e.elements.length !== 1) return undefined;
+  if (!ts.isArrayLiteralExpression(e) || e.elements.length !== 1) {
+    return undefined;
+  }
   const only = e.elements[0];
   return only !== undefined && ts.isCallExpression(only) ? only : undefined;
+}
+
+/** Which TypeScript dialect a file is written in.
+ *
+ * `.tsx` is not a variant spelling of `.ts`. The two disagree about what `<` means
+ * at the head of an expression, so a file parsed in the wrong one does not fail: it
+ * parses as something else entirely, and a JSX element comes apart into comparisons.
+ */
+export type Dialect = "ts" | "tsx";
+
+/** The dialect a file name implies. Anything that is not `.tsx` is `ts`, which is
+ * what the compiler itself assumes for an unknown extension. */
+export function dialectOf(fileName: string): Dialect {
+  return fileName.endsWith(".tsx") ? "tsx" : "ts";
+}
+
+/** Whether a path is one loitsu has any business expanding. TypeScript only, and
+ * not the declaration files, which carry no bodies for a macro to be written in. */
+export function interesting(path: string): boolean {
+  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) => path.endsWith(e));
+  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>
+    path.endsWith(e)
+  );
+  return source && !declaration;
 }
 
 /**
@@ -111,9 +158,14 @@ export function uses(
       const target = list[i + 1];
 
       found.push(
-        target === undefined
-          ? { form: "dangling", name, start, end }
-          : { form: "attribute", name, args: call.arguments, start, end, target },
+        target === undefined ? { form: "dangling", name, start, end } : {
+          form: "attribute",
+          name,
+          args: call.arguments,
+          start,
+          end,
+          target,
+        },
       );
     });
   };
