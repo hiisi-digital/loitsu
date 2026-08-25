@@ -27,6 +27,7 @@
 
 import { type Cached, cached } from "./cache.ts";
 import type { Registry } from "./macro.ts";
+import { interesting } from "./syntax.ts";
 
 /** Reads a file's current text. Injectable so the rebuild rules can be tested
  * without a filesystem, and so a language server that already holds an unsaved
@@ -231,16 +232,6 @@ export class Twins {
 
 /** The signal event a watch listens for and then stops listening for. */
 const ABORT = "abort";
-
-/** Whether a path is one loitsu has any business expanding. TypeScript only, and
- * not the declaration files, which carry no bodies for a macro to be written in. */
-export function interesting(path: string): boolean {
-  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) => path.endsWith(e));
-  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>
-    path.endsWith(e)
-  );
-  return source && !declaration;
-}
 
 /** What a filesystem watch needs to keep a `Twins` current. */
 export interface WatchOptions {

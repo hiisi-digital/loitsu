@@ -38,7 +38,7 @@ export type {
   Use,
 } from "./src/syntax.ts";
 export type { Dialect } from "./src/syntax.ts";
-export { dialectOf, offsetIn, uses } from "./src/syntax.ts";
+export { dialectOf, interesting, offsetIn, uses } from "./src/syntax.ts";
 
 export type { Run, Span, SpanTable } from "./src/spans.ts";
 export {
@@ -98,10 +98,22 @@ export type {
   Unreadable,
   WatchOptions,
 } from "./src/watch.ts";
-export { interesting, Twins, watch } from "./src/watch.ts";
+export { Twins, watch } from "./src/watch.ts";
 
 export type { DocumentsOptions, Open } from "./src/documents.ts";
 export { Documents } from "./src/documents.ts";
 
 export type { Channel, ServerOptions } from "./src/server.ts";
 export { Server } from "./src/server.ts";
+
+export type {
+  BunBuilder,
+  BunPlugin,
+  Host,
+  Installed,
+  InstallOptions,
+  NodeHooks,
+  NodeLoaded,
+  Rewrite,
+} from "./src/install.ts";
+export { bunPlugin, install, nodeHook } from "./src/install.ts";

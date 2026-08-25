@@ -669,6 +669,120 @@ const PLANS: Record<string, readonly Mutation[]> = {
       to: NEVER,
     },
   ],
+  // The seam itself. Every arm here is a way the hook could look installed and
+  // hand the runtime something it should not have: the source instead of the
+  // twin, a twin without the format that makes it loadable, or an expansion of
+  // a file nobody asked to expand.
+  // `interesting` decides which files anything here looks at, so it sits under
+  // the watcher and under every seam `install` puts in front of a loader. It
+  // moved out of the watcher when the seams needed it, and its arms came with
+  // it rather than being left behind pointing at text that had gone.
+  "src/syntax.ts": [
+    ...ways(
+      "  return source && !declaration;",
+      ["declaration files are expanded too", "  return source;"],
+      ["everything is interesting", "  return true;"],
+    ),
+    ...ways(
+      '  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) =>',
+      [
+        "the module extensions are ignored",
+        '  const source = [".ts", ".tsx"].some((e) =>',
+      ],
+    ),
+    ...ways(
+      '  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>',
+      [
+        "only the plain declaration form is refused",
+        '  const declaration = [".d.ts"].some((e) =>',
+      ],
+    ),
+  ],
+  "src/install.ts": [
+    ...ways(
+      "  if (path === undefined || !matches(path)) return got;",
+      [
+        "every file is expanded, whatever the filter says",
+        NEVER_TOP,
+      ],
+      [
+        "a specifier that is not a file is expanded as though it were one",
+        "  if (!matches(path as string)) return got;",
+      ],
+    ),
+    ...ways(
+      "  return { ...got, source: rewrite(path, text), shortCircuit: true };",
+      [
+        "the format the runtime worked out is dropped, so a twin reaches V8 with its types on",
+        "  return { source: rewrite(path, text), shortCircuit: true } as NodeLoaded;",
+      ],
+      [
+        "the load is not claimed, so whatever runs next may overwrite the twin",
+        "  return { ...got, source: rewrite(path, text) };",
+      ],
+      [
+        "the twin is thrown away and the source goes on",
+        "  return got;",
+      ],
+    ),
+    ...ways(
+      '  const text = typeof got.source === "string"',
+      [
+        "bytes are handed to the expansion as though they were text",
+        "  const text = (true as boolean)",
+      ],
+    ),
+    ...ways(
+      "          contents: matches(args.path) ? rewrite(args.path, text) : text,",
+      [
+        "bun expands every file its pattern reaches, filter or not",
+        "          contents: rewrite(args.path, text),",
+      ],
+      [
+        "bun expands nothing, and the plugin is decoration",
+        "          contents: text,",
+      ],
+    ),
+    ...ways(
+      '          loader: args.path.endsWith("x") ? "tsx" : "ts",',
+      [
+        "a tsx file is handed to bun as plain ts",
+        '          loader: "ts",',
+      ],
+    ),
+    ...ways(
+      "  const matches = options.matches ?? interesting;",
+      [
+        "the default filter is gone, so an install without one expands nothing",
+        "  const matches = options.matches ?? (() => false);",
+      ],
+      [
+        "the default filter is everything, including files with no bodies to expand",
+        "  const matches = options.matches ?? (() => true);",
+      ],
+    ),
+    ...ways(
+      "    if (builtin?.registerHooks === undefined) {",
+      [
+        "a runtime too old for the hook is left to fail somewhere else",
+        NEVER_IN,
+      ],
+    ),
+    ...ways(
+      "      host: (globalThis as Partial<HasDeno>).Deno === undefined",
+      [
+        "deno is reported as node, so a caller cannot tell which seam it got",
+        "      host: (true as boolean)",
+      ],
+    ),
+    ...ways(
+      '  if (!url.startsWith("file://")) return undefined;',
+      [
+        "a data or builtin specifier is treated as a path on disk",
+        NEVER_TOP,
+      ],
+    ),
+  ],
   "src/watch.ts": [
     // Everything else in the suite injects a reader, so nothing else would notice
     // the default one going away. It is what a consumer actually gets.
@@ -747,25 +861,6 @@ const PLANS: Record<string, readonly Mutation[]> = {
       from: "        path,",
       to: "        undefined,",
     },
-    ...ways(
-      "  return source && !declaration;",
-      ["declaration files are expanded too", "  return source;"],
-      ["everything is interesting", "  return true;"],
-    ),
-    ...ways(
-      '  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) =>',
-      [
-        "the module extensions are ignored",
-        '  const source = [".ts", ".tsx"].some((e) =>',
-      ],
-    ),
-    ...ways(
-      '  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>',
-      [
-        "only the plain declaration form is refused",
-        '  const declaration = [".d.ts"].some((e) =>',
-      ],
-    ),
     {
       what: "a deleted file keeps its twin instead of being forgotten",
       from: "      else options.twins.forget(path);",

@@ -21,7 +21,8 @@ import {
 } from "@std/assert";
 import { registry } from "../src/macro.ts";
 import { macros, named } from "./macro_helpers.ts";
-import { interesting, Twins, watch } from "../src/watch.ts";
+import { Twins, watch } from "../src/watch.ts";
+import { interesting } from "../src/syntax.ts";
 import { sourceOffset } from "../src/spans.ts";
 import { expand } from "../src/expand.ts";
 

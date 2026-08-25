@@ -121,6 +121,16 @@ export function dialectOf(fileName: string): Dialect {
   return fileName.endsWith(".tsx") ? "tsx" : "ts";
 }
 
+/** Whether a path is one loitsu has any business expanding. TypeScript only, and
+ * not the declaration files, which carry no bodies for a macro to be written in. */
+export function interesting(path: string): boolean {
+  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) => path.endsWith(e));
+  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>
+    path.endsWith(e)
+  );
+  return source && !declaration;
+}
+
 /**
  * Every macro invocation in `text`, in source order.
  *
