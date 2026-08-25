@@ -14,6 +14,11 @@ import ts from "typescript";
 import { registry } from "../src/macro.ts";
 import { offsetIn, type Use, uses } from "../src/syntax.ts";
 
+/** A stand-in expression, for the registries below that are never expanded
+ * through. What is under test there is which macro comes back out, so what any
+ * of them would have produced does not come into it. */
+const NOTHING = ts.factory.createNull();
+
 /** A registry that knows `cfg` as an attribute and `env` as a call. */
 const known = registry([
   { kind: "attribute", name: "cfg", expand: (_a, item) => [item.node] },
@@ -102,6 +107,34 @@ Deno.test("two macros of one kind cannot share a name", () => {
     Error,
     "two attribute macros are named cfg",
   );
+
+  // Both kinds, because one map checked twice refuses attributes and lets every
+  // duplicate function through, and a test that only ever names attributes says
+  // the refusal works.
+  assertThrows(
+    () =>
+      registry([
+        { kind: "function", name: "include_str", expand: () => NOTHING },
+        { kind: "function", name: "include_str", expand: () => NOTHING },
+      ]),
+    Error,
+    "two function macros are named include_str",
+  );
+});
+
+Deno.test("a name is only taken within its own kind", () => {
+  // The two kinds are written differently and resolved separately, so `cfg` as
+  // an attribute and `cfg!` as a call are two macros and both are allowed. A
+  // refusal that reached across the kinds would forbid a pairing the design
+  // means to permit.
+  const both = registry([
+    { kind: "attribute", name: "cfg", expand: (_a, i) => [i.node] },
+    { kind: "function", name: "cfg", expand: () => NOTHING },
+  ]);
+  assert(both.attribute("cfg") !== undefined);
+  assert(both.function("cfg") !== undefined);
+  assertEquals(both.attribute("include_str"), undefined);
+  assertEquals(both.function("include_str"), undefined);
 });
 
 Deno.test("the harness can fail, so the laws above mean something", () => {

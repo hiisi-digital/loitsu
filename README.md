@@ -2,7 +2,9 @@
 
 <div align="center" style="text-align: center;">
 
+[![GitHub Stars](https://img.shields.io/github/stars/hiisi-digital/loitsu.svg)](https://github.com/hiisi-digital/loitsu/stargazers)
 [![JSR](https://jsr.io/badges/@hiisi/loitsu)](https://jsr.io/@hiisi/loitsu)
+[![npm](https://img.shields.io/npm/v/loitsu)](https://www.npmjs.com/package/loitsu)
 [![GitHub Issues](https://img.shields.io/github/issues/hiisi-digital/loitsu.svg)](https://github.com/hiisi-digital/loitsu/issues)
 ![License](https://img.shields.io/github/license/hiisi-digital/loitsu?color=%23009689)
 
@@ -45,6 +47,12 @@ else. A misspelled macro name is `TS2552` with a suggestion, a misspelled
 operand is `TS2304`, and a wrong argument type is `TS2345`. You get the normal
 errors in the normal place rather than a separate diagnostic channel that only
 this tool knows about.
+
+## Status
+
+Pre-release. The api hasn't settled and breaking changes should be expected, so
+I'd caution against reaching for this in anything serious just yet. Pin an exact
+version if you do.
 
 ## Installation
 
@@ -132,7 +140,7 @@ span table it comes with says which part of the twin came from where.
 ```ts
 import { cached, expand, registry, sourceRuns, uses } from "@hiisi/loitsu";
 import type { AttributeMacro, FunctionMacro } from "@hiisi/loitsu";
-import ts from "npm:typescript@^5.9.2"; // the version loitsu builds against
+import ts from "typescript"; // ^5.9.2, which is what loitsu builds against
 
 // arguments arrive as expressions, because that's what the parser made of them.
 // `cfg(deno)` gives an identifier and `cfg("deno")` a string literal, and both
@@ -373,9 +381,6 @@ came from.
 
 ## Limitations
 
-The api hasn't settled and breaking changes should be expected. I'd caution
-against using this for anything serious just yet.
-
 A loader hook only reaches what is loaded after it, so a module imported
 alongside the one that installs is already resolved by the time the hook runs.
 Your program has to come after it on the command line, or be reached through a
@@ -389,7 +394,7 @@ A macro has to build its expansion with `ts.factory`, or out of nodes from the
 item it was handed. Parsing a template and returning those nodes is refused,
 because the printer would slice your file at positions that mean something in a
 different one, and what comes out is a fragment of your own source picked more
-or less at random. That used to happen silently, which was worse.
+or less at random.
 
 The cache doesn't evict anything yet. It's content-keyed, so editing a file
 leaves the old entry behind rather than replacing it, and over a long session

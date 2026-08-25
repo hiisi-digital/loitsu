@@ -40,10 +40,5 @@
       "deno.json"
     ]
   },
-  "minimumDependencyAge": 0,
-  "links": [
-    "../viola",
-    "../viola-default-lints",
-    "../viola-grammar-ts"
-  ]
+  "minimumDependencyAge": 0
 }

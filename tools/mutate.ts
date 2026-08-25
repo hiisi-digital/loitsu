@@ -95,6 +95,15 @@ function ways(
   return variants.map(([what, to]) => ({ what, from, to }));
 }
 
+/* Two source files have no plan here, deliberately.
+ *
+ * `mod.ts` is re-exports, and what it re-exports is pinned by the manifest arm
+ * of `tests/npm_test.ts`: a name dropped from it fails there rather than
+ * silently. `preload.ts` is ten lines whose whole content is a side effect on
+ * import, and `tests/runtimes_test.ts` runs it on node and on bun.
+ *
+ * Said out loud because a count reads as a complete set, and neither omission
+ * announces itself. */
 const PLANS: Record<string, readonly Mutation[]> = {
   // The sandbox tests pin Deno's behaviour rather than loitsu's, so there is no
   // source of ours to mutate for most of what they claim. What is ours is the
@@ -783,9 +792,47 @@ const PLANS: Record<string, readonly Mutation[]> = {
       ],
     ),
   ],
+  // The registry is a published export and the readme advertises its one
+  // refusal, so it gets a plan of its own rather than resting on the tests that
+  // happen to build registries on the way to somewhere else.
+  "src/macro.ts": [
+    ...ways(
+      "    if (into.has(macro.name)) {",
+      [
+        "two macros of one kind and one name are both accepted, and the second wins",
+        "    if (false) {",
+      ],
+    ),
+    ...ways(
+      '    const into = macro.kind === "attribute" ? attributes : functions;',
+      [
+        "the refusal looks in the other kind's map, so a duplicate goes through and " +
+        "an attribute named after a function is refused instead",
+        '    const into = macro.kind === "attribute" ? functions : attributes;',
+      ],
+      [
+        "the refusal only ever looks at attributes, so two functions of one name pass",
+        "    const into = attributes;",
+      ],
+    ),
+    ...ways(
+      '    if (macro.kind === "attribute") attributes.set(macro.name, macro);',
+      [
+        "every macro is filed as a function, so no attribute is ever found",
+        "    if (false) attributes.set(macro.name, macro);",
+      ],
+    ),
+    ...ways(
+      "    attribute: (name) => attributes.get(name),",
+      [
+        "an attribute lookup answers from the function map",
+        "    attribute: (name) => functions.get(name) as AttributeMacro | undefined,",
+      ],
+    ),
+  ],
   "src/watch.ts": [
-    // Everything else in the suite injects a reader, so nothing else would notice
-    // the default one going away. It is what a consumer actually gets.
+    // Every other test here injects a reader. One does not, and it is the one
+    // that has to catch this, because the default is what a consumer gets.
     ...ways(
       "    this.#read = options.read ?? ((path) => Deno.readTextFile(path));",
       [

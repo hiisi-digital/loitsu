@@ -139,7 +139,11 @@ export async function main(args: readonly string[]): Promise<number> {
 
     if (it.verb === VERBS[0]) {
       const done = await build(found, { root: it.root, out: it.out });
-      console.log(`${done.files.length} file(s) into ${it.out}`);
+      // What was written, not what was walked. A file that could not be read
+      // has an entry and no twin, and counting entries reports a tree into a
+      // directory that may not exist.
+      const wrote = done.files.filter((f) => f.twin !== undefined).length;
+      console.log(`${wrote} file(s) into ${it.out}`);
       if (done.failed > 0) console.log(`${done.failed} with something to say`);
       return done.failed > 0 ? 1 : 0;
     }

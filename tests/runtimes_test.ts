@@ -22,6 +22,7 @@
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
+import { have, inRuntime } from "./runtime_helpers.ts";
 
 /** This repository, so a fixture can reach the module under test. */
 const HERE = fromFileUrl(new URL("../", import.meta.url));
@@ -75,20 +76,6 @@ async function portable(): Promise<string> {
 const named = (path: string): string =>
   path.split("/").filter(Boolean).pop() ?? path;
 
-/** Whether a command is on this machine at all. */
-async function have(program: string): Promise<boolean> {
-  try {
-    const ran = await new Deno.Command(program, {
-      args: ["--version"],
-      stdout: "null",
-      stderr: "null",
-    }).output();
-    return ran.success;
-  } catch {
-    return false;
-  }
-}
-
 /** A tree with a config in it.
  *
  * Not `project`: that name belongs to the loader in `cli/project.ts`, which takes
@@ -109,25 +96,6 @@ async function aTree(): Promise<string> {
       `export default { registry: registry([cfg]), against: "rt", cacheDir: undefined };\n`,
   );
   return root;
-}
-
-/** Run one line of code in a runtime, from inside the project. */
-async function inRuntime(
-  program: string,
-  args: readonly string[],
-  cwd: string,
-): Promise<{ code: number; out: string }> {
-  const ran = await new Deno.Command(program, {
-    args: [...args],
-    cwd,
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  const read = new TextDecoder();
-  return {
-    code: ran.code,
-    out: read.decode(ran.stdout) + read.decode(ran.stderr),
-  };
 }
 
 Deno.test("node can load the register module at all", async () => {
