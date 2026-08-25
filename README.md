@@ -67,9 +67,10 @@ Or without installing:
 deno run --allow-read --allow-write --allow-run --allow-env jsr:@hiisi/loitsu/cli
 ```
 
-The permissions are the ones it needs and no more. It reads your sources, writes
-the twins, runs the type checker or the language server you point it at, and
-reads the environment those want.
+Those are the permissions it actually uses, rather than `-A`. It reads your
+sources, writes the twins, and runs whichever checker or language server you
+point it at, which wants some of the environment. If a flag there looks wider
+than you expected, that is worth an issue.
 
 On node and bun, from npm, where the name is unscoped:
 
@@ -90,12 +91,37 @@ loitsu lsp                  # proxy an editor to a language server, over the twi
 loitsu lsp -- <command>     # proxy to that one instead of `deno lsp`
 ```
 
-`check` exists because `deno check` reads what is on disk and cannot see
-anything a running program registered, so what it checks has to already be
-expanded. `lsp` exists for the same reason on the editor's side: the inner
-server is handed the twin under your source's own uri and never learns the
-source is there, and every position in every message crosses back on the way
-out.
+`check` and `lsp` both exist for the same reason: `deno check` reads what is on
+disk, and an editor's language server does too, so neither can see anything a
+running program registered. What they get handed has to already be expanded. The
+inner server never learns your source is there, and every position in every
+message crosses back before you see it.
+
+## Running it on node and bun
+
+The expansion goes in front of the loader there, and the line that puts it there
+names a module that already exists:
+
+```bash
+npm install loitsu
+node --import loitsu/preload app.js
+bun --preload loitsu/preload app.ts
+```
+
+`preload` finds your `loitsu.config.ts` the way the command does, upward from
+where you are standing, and installs the macros it names. Nothing to write.
+
+Node wants two things of that config, since it is TypeScript with imports in it:
+`"type": "module"` in your `package.json`, and `--experimental-strip-types` on
+versions where stripping is not yet the default. Bun and deno want neither.
+
+The flag has to stay on the command line. `imports` in a `package.json` is a
+subpath map rather than a preload hook, so it cannot carry this, and a static
+import in your own source runs too late for the reason in Limitations.
+
+Deno needs none of it to run, since it runs TypeScript already. What it cannot
+do is check text that a running program registered, which is why `check` and
+`lsp` are commands here rather than something you switch on.
 
 ## Usage
 
@@ -350,33 +376,11 @@ came from.
 The api hasn't settled and breaking changes should be expected. I'd caution
 against using this for anything serious just yet.
 
-On node and bun the expansion goes in front of the loader, and the line that
-puts it there names a module that already exists:
-
-```bash
-npm install loitsu
-node --import loitsu/preload app.js
-bun --preload loitsu/preload app.ts
-```
-
-`preload` finds your `loitsu.config.ts` the way the command does, upward from
-where you are standing, and installs the macros it names. Nothing to write.
-
-Two things node wants of that config, since it is TypeScript with imports in it:
-`"type": "module"` in your `package.json`, and `--experimental-strip-types` on
-versions where stripping is not yet on by default. Bun and deno need neither.
-
-There is no way to move that flag into `package.json`. Its `imports` field is a
-subpath map rather than a preload hook, and a static import in your own source
-is already too late, for the reason just below.
-
-A hook reaches what is loaded after it, so a module imported alongside the one
-that installs is already resolved by the time it runs. Your program has to come
-after it on the command line, or be reached through a dynamic import.
-
-Deno needs none of that to run, since it executes TypeScript. What it cannot do
-is check text a running program registered, which is why `check` and `lsp` are
-commands rather than something you switch on.
+A loader hook only reaches what is loaded after it, so a module imported
+alongside the one that installs is already resolved by the time the hook runs.
+Your program has to come after it on the command line, or be reached through a
+dynamic import. That is a fact about loaders rather than about this, but it is
+the thing that catches people.
 
 Expansion is whole file at a time, not incremental. Fine at the sizes this has
 been used on, and would want attention before it isn't.
