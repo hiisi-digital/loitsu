@@ -95,6 +95,15 @@ function ways(
   return variants.map(([what, to]) => ({ what, from, to }));
 }
 
+/* Two source files have no plan here, deliberately.
+ *
+ * `mod.ts` is re-exports, and what it re-exports is pinned by the manifest arm
+ * of `tests/npm_test.ts`: a name dropped from it fails there rather than
+ * silently. `preload.ts` is ten lines whose whole content is a side effect on
+ * import, and `tests/runtimes_test.ts` runs it on node and on bun.
+ *
+ * Said out loud because a count reads as a complete set, and neither omission
+ * announces itself. */
 const PLANS: Record<string, readonly Mutation[]> = {
   // The sandbox tests pin Deno's behaviour rather than loitsu's, so there is no
   // source of ours to mutate for most of what they claim. What is ours is the

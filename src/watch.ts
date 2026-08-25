@@ -49,7 +49,12 @@ export interface Twin extends Cached, Rebuilt {}
 /** Why a path has no twin. A file being unreadable is an ordinary thing that
  * happens constantly while an editor saves, so it is reported rather than thrown. */
 export interface Unreadable extends Rebuilt {
-  /** What the read failed with, as its constructor name. */
+  /** Why there is no twin.
+   *
+   * A failed read puts the error's constructor name here, so `"NotFound"` while
+   * an editor is mid-save is a value to compare against. A macro that threw puts
+   * its message here instead, which is prose and is not. Read it as a
+   * discriminant only after checking it against the names you care about. */
   readonly why: string;
 }
 

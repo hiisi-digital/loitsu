@@ -162,17 +162,18 @@ Deno.test("the installed command runs when bun is the one running it", async () 
   }
   const dir = await consumer();
 
-  // bun executing the file, which is `bun run` and `bunx --bun`. The test above
-  // cannot stand in for this one and the reverse is also true: `.bin/loitsu`
-  // carries a node shebang, so executing it runs node whoever installed it, and
-  // a suite that reached both through that shebang would be one test written
-  // twice under two names.
+  // The same symlink as the test above, handed to bun instead of executed. That
+  // is `bun run` and `bunx --bun`, and it is deliberately the symlink rather
+  // than the file behind it, because the link is where the two runtimes parted:
+  // node reports the link in `argv[1]` and the realpath in `import.meta.url`,
+  // bun reports the realpath in both.
   //
-  // Measured on the entry point this replaced: node printed nothing through the
-  // shebang and bun printed the version when handed the same file, because bun
-  // resolves the link before setting `argv[1]` and node does not. So the two
-  // runtimes really do disagree here, and only one of them disagreed loudly.
-  const bin = join(dir, "node_modules", "loitsu", "esm", "bin.js");
+  // So this pair is the whole finding. Against the entry point this replaced,
+  // the test above goes red and this one stays green, which is a shape worse
+  // than plain broken: a bun user reaching for `bun run` would have concluded
+  // the command was fine. Against the entry point here, both are green, because
+  // nothing is asking who is running it any more.
+  const bin = join(dir, "node_modules", ".bin", "loitsu");
   const done = await ran("bun", [bin, "--version"], dir);
 
   assertEquals(done.code, 0, `the command failed under bun:\n${done.out}`);
