@@ -1,3 +1,8 @@
+//----------------------------------------------------------------------------------------------------
+// Copyright (c) 2025                    Hiisi Digital                    ort@hiisi.digital
+// SPDX-License-Identifier: MPL-2.0      https://mozilla.org/MPL/2.0      contact@hiisi.digital
+//----------------------------------------------------------------------------------------------------
+
 /**
  * Turning a tree of sources into a tree of twins.
  *

@@ -124,10 +124,21 @@ function carry(
   }
   if (isPosition(value)) return crossing.point(value, uri) ?? DROPPED;
 
-  // A document naming itself governs everything under it. `changes` in a
-  // workspace edit is the one place the name is a key rather than a field, so
-  // it is handled where it sits rather than by a rule about keys generally.
-  const here = typeof value.uri === "string" ? value.uri : uri;
+  // A document naming itself governs everything under it. There are three ways a
+  // message says which document it means and all three have to be read, because
+  // missing one does not drop the crossing, it returns the position unchanged:
+  // a twin coordinate reported against the source, silently, which is the one
+  // outcome worse than dropping it.
+  //
+  //   uri                        on the value itself
+  //   textDocument.uri           the `documentChanges` arm of a workspace edit
+  //   changes                    keyed by uri, handled below
+  const named = typeof value.uri === "string"
+    ? value.uri
+    : isRecord(value.textDocument) && typeof value.textDocument.uri === "string"
+    ? value.textDocument.uri
+    : undefined;
+  const here = named ?? uri;
 
   const out: Record<string, unknown> = {};
   for (const [key, one] of Object.entries(value)) {

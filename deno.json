@@ -29,6 +29,7 @@
     "include": [
       "mod.ts",
       "src/",
+      "cli/",
       "README.md",
       "LICENSE",
       "deno.json"

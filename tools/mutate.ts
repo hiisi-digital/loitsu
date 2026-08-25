@@ -1181,6 +1181,13 @@ ${DROP_TEMP}
 
   "src/protocol.ts": [
     ...ways(
+      '    : isRecord(value.textDocument) && typeof value.textDocument.uri === "string"\n    ? value.textDocument.uri',
+      [
+        "the uri under textDocument is not read, so a documentChanges edit crosses nowhere",
+        "    : false\n    ? value.textDocument.uri",
+      ],
+    ),
+    ...ways(
       '    typeof value.character === "number";',
       [
         "a line alone is read as a position, so an offset pair becomes one",
@@ -1230,14 +1237,14 @@ ${DROP_TEMP}
       ],
     ),
     ...ways(
-      '  const here = typeof value.uri === "string" ? value.uri : uri;',
+      "  const here = named ?? uri;",
       [
         "a document naming itself is ignored for everything under it",
         "  const here = uri;",
       ],
       [
         "the ambient document is dropped rather than carried down",
-        '  const here = typeof value.uri === "string" ? value.uri : undefined;',
+        "  const here = named;",
       ],
     ),
     ...ways(
@@ -1546,6 +1553,13 @@ ${DROP_TEMP}
   ],
   "cli/sources.ts": [
     ...ways(
+      '  ".loitsu",\n  ".git",',
+      [
+        "the tool's own output is walked, so a second build expands the first",
+        '  ".git",',
+      ],
+    ),
+    ...ways(
       "      if (skip.has(one.name)) continue;",
       [
         "a walk goes into the tool directories too",
@@ -1705,6 +1719,19 @@ ${DROP_TEMP}
       [
         "the command after -- is read one word short",
         '    if (one === "--") {\n      inner = args.slice(i + 2);',
+      ],
+    ),
+  ],
+  "src/version.ts": [
+    ...ways(
+      'export const VERSION = "0.1.0";',
+      [
+        "the reported version drifts from the published one",
+        'export const VERSION = "0.1.1";',
+      ],
+      [
+        "the reported version is not a version at all",
+        'export const VERSION = "next";',
       ],
     ),
   ],

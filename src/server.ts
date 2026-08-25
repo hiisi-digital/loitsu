@@ -286,7 +286,7 @@ export class Server {
     if (down === DROPPED) {
       // The request names a place with no twin, so there is nothing to ask
       // about. A request still owes an answer; a notification owes nothing.
-      await this.#nothing(message.id);
+      await this.#nothing(this.#toEditor, message.id);
       return;
     }
     await this.#send(this.#toInner, down);
@@ -386,21 +386,31 @@ export class Server {
     if (up === DROPPED) {
       // A whole message with nowhere to land. An answer the editor is waiting
       // for still has to arrive, so it arrives empty.
-      await this.#nothing(message.id);
+      await this.#nothing(this.#toInner, message.id);
       return;
     }
     await this.#send(this.#toEditor, up);
   }
 
   /**
-   * Tell the editor there is no answer, where it is waiting for one.
+   * Tell whoever asked that there is no answer.
    *
    * A notification is owed nothing and gets nothing. A request left unanswered
-   * is a request an editor waits on until it gives up.
+   * is a request its sender waits on until it gives up.
+   *
+   * The reply goes back the way the request came. Both ends may ask: an editor
+   * asks for a definition, and a server asks the editor to show a document or
+   * to apply an edit. They number their requests separately, so answering a
+   * server's request to the editor sends the editor an id from the wrong id
+   * space, against a request the editor may well have outstanding under that
+   * same number, while the server that asked waits forever.
    */
-  async #nothing(id: Message["id"]): Promise<void> {
+  async #nothing(
+    to: WritableStreamDefaultWriter<Uint8Array> | undefined,
+    id: Message["id"],
+  ): Promise<void> {
     if (id == null) return;
-    await this.#send(this.#toEditor, { jsonrpc: "2.0", id, result: null });
+    await this.#send(to, { jsonrpc: "2.0", id, result: null });
   }
 
   /** One framed message, or nothing if that direction is already closed. */

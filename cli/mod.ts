@@ -1,3 +1,8 @@
+//----------------------------------------------------------------------------------------------------
+// Copyright (c) 2025                    Hiisi Digital                    ort@hiisi.digital
+// SPDX-License-Identifier: MPL-2.0      https://mozilla.org/MPL/2.0      contact@hiisi.digital
+//----------------------------------------------------------------------------------------------------
+
 /**
  * The command line.
  *

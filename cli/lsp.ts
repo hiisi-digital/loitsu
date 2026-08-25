@@ -1,3 +1,8 @@
+//----------------------------------------------------------------------------------------------------
+// Copyright (c) 2025                    Hiisi Digital                    ort@hiisi.digital
+// SPDX-License-Identifier: MPL-2.0      https://mozilla.org/MPL/2.0      contact@hiisi.digital
+//----------------------------------------------------------------------------------------------------
+
 /**
  * Running the proxy against a real editor and a real language server.
  *
@@ -127,11 +132,22 @@ export async function lsp(
   }
 
   const stop = () => {
-    try {
-      process?.kill();
-    } catch {
-      // already gone, which is the ordinary way a proxy ends, and is also what
-      // makes stopping twice harmless: the second throw lands here
+    if (process === undefined) return;
+    // Kill the group, not the child.
+    //
+    // A command that is a wrapper leaves a grandchild holding the stdout pipe it
+    // inherited, so the stream never ends, the upward direction never finishes,
+    // and the proxy waits forever on a server the editor has already left. The
+    // spawned process leads its own group, so the negated pid reaches everything
+    // it started.
+    for (const who of [-process.pid, process.pid]) {
+      try {
+        Deno.kill(who, "SIGTERM");
+        break;
+      } catch {
+        // no such group, or it is already gone. Fall through to the child, and
+        // past that to nothing, which is the ordinary way a proxy ends.
+      }
     }
   };
 

@@ -31,25 +31,33 @@ const SWEEP: readonly (readonly [string, readonly string[]])[] = [
   ["src/expand.ts", ["tests/expand_test.ts"]],
   ["src/cache.ts", ["tests/cache_test.ts"]],
   ["src/watch.ts", ["tests/watch_test.ts"]],
-  ["src/install.ts", ["tests/install_test.ts"]],
+  ["src/install.ts", ["tests/install_test.ts", "tests/untested_paths_test.ts"]],
   ["src/syntax.ts", ["tests/watch_test.ts", "tests/install_test.ts"]],
   ["src/position.ts", ["tests/position_test.ts", "tests/translate_test.ts"]],
   ["src/translate.ts", ["tests/translate_test.ts"]],
   ["src/rpc.ts", ["tests/rpc_test.ts"]],
-  ["src/protocol.ts", ["tests/protocol_test.ts"]],
+  ["src/protocol.ts", [
+    "tests/protocol_test.ts",
+    "tests/untested_paths_test.ts",
+  ]],
   ["src/documents.ts", ["tests/documents_test.ts"]],
   ["src/server.ts", ["tests/server_test.ts"]],
   ["tests/readme_test.ts", ["tests/readme_test.ts"]],
   ["tests/sandbox_worker.ts", ["tests/sandbox_test.ts"]],
   ["tests/sandbox_read_worker.ts", ["tests/sandbox_test.ts"]],
   ["tests/sandbox_run_worker.ts", ["tests/sandbox_test.ts"]],
-  ["cli/sources.ts", ["tests/cli_test.ts"]],
+  ["cli/sources.ts", ["tests/cli_test.ts", "tests/untested_paths_test.ts"]],
   ["cli/project.ts", ["tests/cli_test.ts"]],
   ["cli/build.ts", ["tests/cli_test.ts"]],
   ["cli/check.ts", ["tests/cli_test.ts"]],
   ["cli/diagnostics.ts", ["tests/cli_test.ts"]],
-  ["cli/mod.ts", ["tests/cli_test.ts", "tests/lsp_test.ts"]],
+  ["cli/mod.ts", [
+    "tests/cli_test.ts",
+    "tests/lsp_test.ts",
+    "tests/untested_paths_test.ts",
+  ]],
   ["cli/lsp.ts", ["tests/lsp_test.ts"]],
+  ["src/version.ts", ["tests/version_test.ts"]],
 ];
 
 /** Every file `tools/mutate.ts` carries a plan for.
@@ -78,6 +86,7 @@ if (missing.length > 0) {
 
 let survived = 0;
 let mutations = 0;
+let counted = 0;
 let broke = false;
 
 for (const [source, suites] of SWEEP) {
@@ -91,8 +100,11 @@ for (const [source, suites] of SWEEP) {
     new TextDecoder().decode(out.stderr);
 
   const total = text.match(/(\d+) survived of (\d+)/);
-  if (out.code !== 0 || total === null) {
-    // Not "no survivors". No answer at all, which is the case this file exists for.
+  // A total is the answer, whatever the exit code was. `mutate.ts` exits 1 when
+  // something survives, and treating that as "no answer" dropped the survivor
+  // from the count and made the headline read zero: the one number this file
+  // exists to produce was wrong in the direction that reads as success.
+  if (total === null) {
     broke = true;
     console.error(`${source}: the plan did not run to a total`);
     console.error(text.trimEnd());
@@ -104,12 +116,20 @@ for (const [source, suites] of SWEEP) {
   }
   survived += Number(total[1]);
   mutations += Number(total[2]);
+  counted++;
   console.log(`${source.padEnd(18)} ${total[0]}`);
 }
 
+// the plans that produced a total, not the plans that were listed. Counting the
+// list against the arms of a shorter run is two different numbers in one sentence.
 console.log(
-  `\n${survived} survived of ${mutations} across ${SWEEP.length} plans`,
+  `\n${survived} survived of ${mutations} across ${counted} plans`,
 );
+if (counted !== SWEEP.length) {
+  console.error(
+    `${SWEEP.length - counted} of ${SWEEP.length} plans produced no total`,
+  );
+}
 if (broke) {
   console.error("\nat least one plan did not run; nothing here is a result");
   Deno.exit(2);

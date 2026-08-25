@@ -1,3 +1,8 @@
+//----------------------------------------------------------------------------------------------------
+// Copyright (c) 2025                    Hiisi Digital                    ort@hiisi.digital
+// SPDX-License-Identifier: MPL-2.0      https://mozilla.org/MPL/2.0      contact@hiisi.digital
+//----------------------------------------------------------------------------------------------------
+
 /**
  * Where a run finds the macros it is meant to expand.
  *

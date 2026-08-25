@@ -24,7 +24,7 @@
  * first.
  *
  * Measured, with the controls, at
- * `.shared/design/ts-stack/probes/frontend-seams/`.
+ * the probe recorded with this repository's design notes.
  *
  * @module
  */
@@ -94,6 +94,11 @@ function loadRewritten(
   const got = next(url, context);
   const path = pathOf(url);
   if (path === undefined || !matches(path)) return got;
+  // Node hands back no source for some formats, `commonjs` among them, and
+  // decoding `undefined` gives the empty string rather than throwing. Expanding
+  // that and returning it with `shortCircuit` replaced the module with nothing,
+  // silently, for every `.cts` file the hook was asked about.
+  if (got.source === undefined || got.source === null) return got;
   const text = typeof got.source === "string"
     ? got.source
     : new TextDecoder().decode(got.source);

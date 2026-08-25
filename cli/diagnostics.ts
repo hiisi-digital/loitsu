@@ -1,3 +1,8 @@
+//----------------------------------------------------------------------------------------------------
+// Copyright (c) 2025                    Hiisi Digital                    ort@hiisi.digital
+// SPDX-License-Identifier: MPL-2.0      https://mozilla.org/MPL/2.0      contact@hiisi.digital
+//----------------------------------------------------------------------------------------------------
+
 /**
  * Reading `deno check` back.
  *
@@ -8,8 +13,9 @@
  * There is no machine-readable form to ask for, so this parses the human one.
  * That is a real dependency on someone else's output format, which is why the
  * shapes it handles were taken from running the thing rather than from memory,
- * and why `tests/diagnostics_test.ts` runs `deno check` over a file it knows is
- * broken and asserts the parse still finds what is in it. When deno changes the
+ * and why `still finds what deno actually prints`, in `tests/cli_test.ts`, runs
+ * `deno check` over a file it knows is broken and asserts the parse finds what is
+ * in it. When deno changes the
  * format that test fails, which is the whole point of it.
  *
  * @module

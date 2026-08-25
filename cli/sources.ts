@@ -1,3 +1,8 @@
+//----------------------------------------------------------------------------------------------------
+// Copyright (c) 2025                    Hiisi Digital                    ort@hiisi.digital
+// SPDX-License-Identifier: MPL-2.0      https://mozilla.org/MPL/2.0      contact@hiisi.digital
+//----------------------------------------------------------------------------------------------------
+
 /**
  * Which files a run looks at.
  *
@@ -16,6 +21,11 @@ import { interesting } from "../src/syntax.ts";
 /** Directories a walk stays out of unless a caller says otherwise. Each is a
  * place a tool put files there rather than a place anybody wrote them. */
 export const SKIPPED: readonly string[] = [
+  // this tool's own output, which sits under the root it walks. Without it a
+  // second run expands the first run's twins into `.loitsu/twins/.loitsu/twins`
+  // and the file count climbs by one every time, with `check` then reporting the
+  // same error once per level.
+  ".loitsu",
   ".git",
   "node_modules",
   "vendor",
