@@ -28,6 +28,7 @@ export type {
   Macro,
   Registry,
 } from "./src/macro.ts";
+export { VERSION } from "./src/version.ts";
 export { registry } from "./src/macro.ts";
 
 export type {

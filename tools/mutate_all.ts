@@ -43,6 +43,12 @@ const SWEEP: readonly (readonly [string, readonly string[]])[] = [
   ["tests/sandbox_worker.ts", ["tests/sandbox_test.ts"]],
   ["tests/sandbox_read_worker.ts", ["tests/sandbox_test.ts"]],
   ["tests/sandbox_run_worker.ts", ["tests/sandbox_test.ts"]],
+  ["cli/sources.ts", ["tests/cli_test.ts"]],
+  ["cli/project.ts", ["tests/cli_test.ts"]],
+  ["cli/build.ts", ["tests/cli_test.ts"]],
+  ["cli/check.ts", ["tests/cli_test.ts"]],
+  ["cli/diagnostics.ts", ["tests/cli_test.ts"]],
+  ["cli/mod.ts", ["tests/cli_test.ts"]],
 ];
 
 /** Every file `tools/mutate.ts` carries a plan for.

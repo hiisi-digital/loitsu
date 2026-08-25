@@ -1544,6 +1544,163 @@ ${DROP_TEMP}
       ],
     ),
   ],
+  "cli/sources.ts": [
+    ...ways(
+      "      if (skip.has(one.name)) continue;",
+      [
+        "a walk goes into the tool directories too",
+        "      if (false) continue;",
+      ],
+    ),
+    ...ways(
+      "    } else if (one.isFile && matches(path)) {",
+      [
+        "every file is a source, whatever its extension",
+        "    } else if (one.isFile) {",
+      ],
+    ),
+    ...ways(
+      "  const skip = new Set(options.skip ?? SKIPPED);",
+      [
+        "the skip list a caller hands over is ignored",
+        "  const skip = new Set(SKIPPED);",
+      ],
+    ),
+    ...ways(
+      "    for await (const one of entries) found.push(one);\n  } catch {\n    return;\n  }",
+      [
+        "a directory that cannot be read throws instead of being passed over",
+        "    for await (const one of entries) found.push(one);\n  } catch (why) {\n    throw why;\n  }",
+      ],
+    ),
+  ],
+  "cli/project.ts": [
+    ...ways(
+      '  if (found === null || typeof found !== "object") {',
+      [
+        "anything at all is accepted as the project",
+        "  if (false) {",
+      ],
+    ),
+    ...ways(
+      '    typeof registry.attribute !== "function" ||',
+      [
+        "a registry with no attribute side is accepted",
+        "    false ||",
+      ],
+    ),
+    ...ways(
+      '  if (typeof against !== "string" || against === "") {',
+      [
+        "an empty cache key is accepted, so an old twin can be served",
+        '  if (typeof against !== "string") {',
+      ],
+    ),
+  ],
+  "cli/build.ts": [
+    ...ways(
+      "    if (here === CONFIG) continue;",
+      [
+        "the config is expanded into a twin like any other source",
+        "    if (false) continue;",
+      ],
+    ),
+    ...ways(
+      "      spans: twin.spans,",
+      [
+        "no span table is carried, so nothing can be reported where it was written",
+        "      spans: undefined,",
+      ],
+    ),
+    ...ways(
+      "    if (twin.diagnostics.length > 0) failed++;",
+      [
+        "a file the expansion complained about is counted as fine",
+        "    if (false) failed++;",
+      ],
+    ),
+  ],
+  "cli/check.ts": [
+    ...ways(
+      "  if (built.files.length === 0) throw new NothingToCheck(options.root);",
+      [
+        "a run that looked at nothing reports a clean pass",
+        "  if (false) throw new NothingToCheck(options.root);",
+      ],
+    ),
+    ...ways(
+      "        line: at.line + 1,\n        column: at.character + 1,\n        message: why.message,",
+      [
+        "an expansion diagnostic is reported one line above where it is",
+        "        line: at.line,\n        column: at.character + 1,\n        message: why.message,",
+      ],
+      [
+        "an expansion diagnostic is reported one column left of where it is",
+        "        line: at.line + 1,\n        column: at.character,\n        message: why.message,",
+      ],
+    ),
+    ...ways(
+      "      line: at.line + 1,\n      column: at.character + 1,\n      message: one.code",
+      [
+        "a type diagnostic is reported one line above where it is",
+        "      line: at.line,\n      column: at.character + 1,\n      message: one.code",
+      ],
+    ),
+    ...ways(
+      "    const at = here.map.toSource({\n      line: one.line - 1,\n      character: one.column - 1,\n    });",
+      [
+        "a twin position is reported as if it were a source position",
+        "    const at = { line: one.line - 1, character: one.column - 1 };",
+      ],
+    ),
+  ],
+  "cli/diagnostics.ts": [
+    ...ways(
+      "    if (message === undefined) continue;",
+      [
+        "a position with no message above it is given an empty one",
+        '    if (message === undefined) message = "";',
+      ],
+    ),
+    ...ways(
+      "    message = undefined;",
+      [
+        "one message is attributed to every position under it",
+        "    message = message;",
+      ],
+    ),
+    ...ways(
+      "      line: Number(at[2]),\n      column: Number(at[3]),",
+      [
+        "line and column are read the wrong way round",
+        "      line: Number(at[3]),\n      column: Number(at[2]),",
+      ],
+    ),
+    ...ways(
+      "const AT = /^\\s+at (file:\\/\\/\\S+?):(\\d+):(\\d+)\\s*$/;",
+      [
+        "a position line is recognised anywhere in a line, not only indented",
+        "const AT = /at (file:\\/\\/\\S+?):(\\d+):(\\d+)\\s*$/;",
+      ],
+    ),
+  ],
+  "cli/mod.ts": [
+    ...ways(
+      "      return done.said.length > 0 ? 1 : 0;",
+      ["a check that found something still exits zero", "      return 0;"],
+    ),
+    ...ways(
+      "      return done.failed > 0 ? 1 : 0;",
+      [
+        "a build that could not expand something still exits zero",
+        "      return 0;",
+      ],
+    ),
+    ...ways(
+      "    return it.verb === undefined && !it.help ? 1 : 0;",
+      ["being handed no verb at all exits zero", "    return 0;"],
+    ),
+  ],
 };
 
 const [target, ...suite] = Deno.args;
