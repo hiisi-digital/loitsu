@@ -22,6 +22,7 @@
 import { Server } from "../src/server.ts";
 import type { Channel } from "../src/server.ts";
 import type { Project } from "./project.ts";
+import { type Running, start } from "./spawn.ts";
 
 /** The language server proxied when nothing names another. */
 export const INNER: readonly string[] = ["deno", "lsp"];
@@ -58,20 +59,15 @@ export function stdio(): Channel {
  */
 export function spawn(command: readonly string[]): {
   channel: Channel;
-  process: Deno.ChildProcess;
+  process: Running;
 } {
   const [program, ...args] = command;
   if (program === undefined) {
     throw new LspError("no inner server named, so there is nothing to proxy");
   }
-  let process: Deno.ChildProcess;
+  let process: Running;
   try {
-    process = new Deno.Command(program, {
-      args,
-      stdin: "piped",
-      stdout: "piped",
-      stderr: "inherit",
-    }).spawn();
+    process = start(program, args);
   } catch (why) {
     throw new LspError(
       `could not start ${
@@ -101,9 +97,11 @@ function endingWith(
 ): ReadableStream<Uint8Array> {
   return incoming.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
+      // `flush` runs when the writable side closes, which is the editor's end
+      // going away. A cancel arrives as an error on the pipe instead, and is
+      // handled where the pipe is read rather than here: `Transformer` has no
+      // cancel of its own, whatever an editor's autocomplete suggests.
       flush: () => ended(),
-      // a cancelled stream is the same news arriving less politely
-      cancel: () => ended(),
     }),
   );
 }
@@ -122,7 +120,7 @@ export async function lsp(
   const editor = options.editor ?? stdio();
 
   let inner: Channel;
-  let process: Deno.ChildProcess | undefined;
+  let process: Running | undefined;
   if (options.channel !== undefined) {
     inner = options.channel;
   } else {
@@ -131,25 +129,11 @@ export async function lsp(
     process = started.process;
   }
 
-  const stop = () => {
-    if (process === undefined) return;
-    // Kill the group, not the child.
-    //
-    // A command that is a wrapper leaves a grandchild holding the stdout pipe it
-    // inherited, so the stream never ends, the upward direction never finishes,
-    // and the proxy waits forever on a server the editor has already left. The
-    // spawned process leads its own group, so the negated pid reaches everything
-    // it started.
-    for (const who of [-process.pid, process.pid]) {
-      try {
-        Deno.kill(who, "SIGTERM");
-        break;
-      } catch {
-        // no such group, or it is already gone. Fall through to the child, and
-        // past that to nothing, which is the ordinary way a proxy ends.
-      }
-    }
-  };
+  // Killing the group rather than the child is the seam's business, for the
+  // reason it gives: a wrapper command leaves a grandchild holding the pipe, the
+  // stream never ends, and the proxy waits forever on a server the editor has
+  // already left.
+  const stop = () => process?.kill();
 
   const server = new Server({
     editor: {

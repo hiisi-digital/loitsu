@@ -71,12 +71,11 @@ The permissions are the ones it needs and no more. It reads your sources, writes
 the twins, runs the type checker or the language server you point it at, and
 reads the environment those want.
 
-On node and bun, where the expansion goes in front of the loader instead:
+On node and bun, from npm, where the name is unscoped:
 
 ```bash
-npx jsr add @hiisi/loitsu
-node --import @hiisi/loitsu/preload app.js
-bun --preload @hiisi/loitsu/preload app.ts
+npm install -g loitsu       # the command
+npm install loitsu          # the library, and the loader hook
 ```
 
 ## The command
@@ -355,13 +354,17 @@ On node and bun the expansion goes in front of the loader, and the line that
 puts it there names a module that already exists:
 
 ```bash
-npx jsr add @hiisi/loitsu
-node --import @hiisi/loitsu/preload app.js
-bun --preload @hiisi/loitsu/preload app.ts
+npm install loitsu
+node --import loitsu/preload app.js
+bun --preload loitsu/preload app.ts
 ```
 
 `preload` finds your `loitsu.config.ts` the way the command does, upward from
 where you are standing, and installs the macros it names. Nothing to write.
+
+Two things node wants of that config, since it is TypeScript with imports in it:
+`"type": "module"` in your `package.json`, and `--experimental-strip-types` on
+versions where stripping is not yet on by default. Bun and deno need neither.
 
 There is no way to move that flag into `package.json`. Its `imports` field is a
 subpath map rather than a preload hook, and a static import in your own source

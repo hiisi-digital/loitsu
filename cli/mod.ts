@@ -33,6 +33,8 @@ export { reported } from "./diagnostics.ts";
 export type { Reported } from "./diagnostics.ts";
 import { LspError } from "./lsp.ts";
 export { INNER, lsp, LspError, spawn, stdio } from "./lsp.ts";
+export { run, type Running, SpawnError, start } from "./spawn.ts";
+export type { Output } from "./spawn.ts";
 export type { LspOptions } from "./lsp.ts";
 
 /** Where twins go when nobody says otherwise. Under the project, so a relative

@@ -59,7 +59,8 @@ Deno.test("spawning gives a pipe that carries bytes both ways", async () => {
 
   const read = await new Response(channel.incoming).text();
   assertEquals(read, "hei\n");
-  await process.status;
+  // nothing to await: the seam offers what the callers use, and waiting on a
+  // process is not among it. `cat` ends when its input does.
 });
 
 Deno.test("what the editor sends reaches the inner server, expanded", async () => {

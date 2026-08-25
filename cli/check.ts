@@ -25,6 +25,7 @@ import { Lines } from "../src/position.ts";
 import { build, type BuildOptions } from "./build.ts";
 import type { Project } from "./project.ts";
 import { type At, reported } from "./diagnostics.ts";
+import { run } from "./spawn.ts";
 
 /** One thing to say to whoever ran the check, in the text they wrote. */
 export interface Said extends At {
@@ -70,14 +71,10 @@ export interface CheckOptions extends BuildOptions {
 
 /** `deno check` over the twins, with colour off so the output parses. */
 async function denoCheck(twins: readonly string[]): Promise<string> {
-  const ran = await new Deno.Command(Deno.execPath(), {
-    args: ["check", ...twins],
-    env: { NO_COLOR: "1" },
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  const read = new TextDecoder();
-  return read.decode(ran.stdout) + read.decode(ran.stderr);
+  // through the seam rather than `Deno.Command` directly, because this file is
+  // published to npm as well and the shim there carries no process api
+  const ran = await run("deno", ["check", ...twins], { NO_COLOR: "1" });
+  return ran.out;
 }
 
 /**
