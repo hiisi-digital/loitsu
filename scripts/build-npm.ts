@@ -27,6 +27,23 @@ const NPM_NAME = "loitsu";
 /** What `npm install -g` should put on the path. */
 const BIN = "loitsu";
 
+// A mutation run rewrites source files in place and puts them back afterwards,
+// so a build started while one is live compiles a deliberate defect and leaves
+// it in `npm/` looking like any other artifact. Nothing about the result says
+// where it came from, and a reader who finds it has found a shipped bug that
+// does not exist.
+//
+// The lock is `tools/mutate.ts`'s own, so this refuses on the same fact the
+// sweep refuses a second sweep on.
+const MUTATE_LOCK = Deno.env.get("MUTATE_LOCK") ?? ".mutate.lock";
+if (await Deno.stat(MUTATE_LOCK).then(() => true).catch(() => false)) {
+  console.error(
+    `${MUTATE_LOCK} is there, so a mutation run holds the source right now and ` +
+      `anything built from it would carry the mutant. Wait for it to finish.`,
+  );
+  Deno.exit(1);
+}
+
 const manifest = JSON.parse(await Deno.readTextFile("deno.json")) as {
   version: string;
   license: string;
@@ -62,9 +79,12 @@ try {
     // and spawns a type checker, and `{ test: false }` puts the shim nowhere, so
     // the built package throws `Deno is not defined` on the first call.
     //
-    // `register.ts` and `preload.ts` deliberately do not depend on it: they ask
-    // which runtime they are on and reach for that one's api. They are the two
-    // modules node loads first, before anything has had a chance to shim.
+    // `register.ts` and `preload.ts` ask which runtime they are on rather than
+    // assuming, because they are the two modules a runtime loads first. dnt
+    // shims them anyway: it rewrites their `globalThis` to a proxy that answers
+    // `Deno` unconditionally, so on node they take the branch they were written
+    // to avoid and reach `@deno/shim-deno` instead. That works, and it is not
+    // what the source says happens, so it is written down here.
     shims: { deno: true },
     typeCheck: "both",
     // ESM only. The command uses top-level await, which no commonjs form has.
@@ -98,19 +118,33 @@ try {
       // has nowhere to go, which `install.ts` says out loud rather than failing
       // somewhere further along.
       engines: { node: ">=22.15" },
-      bin: { [BIN]: "./esm/cli/mod.js" },
+      bin: { [BIN]: "./esm/bin.js" },
     },
     postBuild(): void {
       Deno.copyFileSync("LICENSE", `${outDir}/LICENSE`);
       Deno.copyFileSync("README.md", `${outDir}/README.md`);
 
-      // npm's own documentation is explicit that without this "the scripts are
-      // started without the node executable". dnt does not add it.
-      const cli = `${outDir}/esm/cli/mod.js`;
-      const text = Deno.readTextFileSync(cli);
-      if (!text.startsWith("#!")) {
-        Deno.writeTextFileSync(cli, `#!/usr/bin/env node\n${text}`);
-      }
+      // The command's own entry point, written here rather than taken from
+      // `cli/mod.ts`.
+      //
+      // That module ends in `if (import.meta.main)`, and dnt lowers it to a
+      // comparison between `import.meta.url` and `process.argv[1]`. npm installs
+      // a bin as a symlink, so node reports the link in `argv[1]` and the real
+      // path in `import.meta.url`, the two never match, and the command exits
+      // zero having printed nothing. Every documented install path goes through
+      // that symlink: `npm install -g`, `bun install -g`, `npx`, `bunx`.
+      //
+      // So the bin does not ask whether it is the program being run. It is.
+      //
+      // npm's own documentation is explicit that without the shebang "the
+      // scripts are started without the node executable". dnt does not add it.
+      Deno.writeTextFileSync(
+        `${outDir}/esm/bin.js`,
+        `#!/usr/bin/env node
+import { main } from "./cli/mod.js";
+process.exitCode = await main(process.argv.slice(2));
+`,
+      );
     },
   });
 } finally {

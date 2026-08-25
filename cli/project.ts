@@ -49,10 +49,11 @@ export class ProjectError extends Error {
 /**
  * The project rooted at `root`.
  *
- * The config is imported, so it runs. That is the point of it being TypeScript
- * and it is also the reason the path is checked before the import: a config
- * outside the root would be somebody else's code running under this project's
- * name.
+ * The config is imported, so it runs. That is the point of it being TypeScript,
+ * and it means `root` decides which code runs: a relative one is joined onto the
+ * working directory and an absolute one is taken as given, with no containment
+ * check between them. Whoever passes `--root` is choosing a program to execute,
+ * the same way naming a script on a command line is.
  */
 export async function project(root: string): Promise<Project> {
   const path = isAbsolute(root)

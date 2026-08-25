@@ -13,8 +13,8 @@
  * including from the test suite.
  *
  * ```bash
- * node --import @hiisi/loitsu/preload app.js
- * bun --preload @hiisi/loitsu/preload app.ts
+ * node --import loitsu/preload app.js
+ * bun --preload loitsu/preload app.ts
  * ```
  *
  * A hook reaches what is loaded after it, so the program comes after this on the
