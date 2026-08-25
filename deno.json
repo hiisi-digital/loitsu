@@ -6,7 +6,8 @@
     ".": "./mod.ts",
     "./syntax": "./src/syntax.ts",
     "./macro": "./src/macro.ts",
-    "./cli": "./cli/mod.ts"
+    "./cli": "./cli/mod.ts",
+    "./register": "./register.ts"
   },
   "tasks": {
     "check": "deno check mod.ts cli/mod.ts",
@@ -28,6 +29,7 @@
   "publish": {
     "include": [
       "mod.ts",
+      "register.ts",
       "src/",
       "cli/",
       "README.md",

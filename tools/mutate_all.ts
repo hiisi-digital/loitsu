@@ -57,6 +57,7 @@ const SWEEP: readonly (readonly [string, readonly string[]])[] = [
     "tests/untested_paths_test.ts",
   ]],
   ["cli/lsp.ts", ["tests/lsp_test.ts"]],
+  ["register.ts", ["tests/register_test.ts"]],
   ["src/version.ts", ["tests/version_test.ts"]],
 ];
 

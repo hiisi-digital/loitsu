@@ -1735,6 +1735,29 @@ ${DROP_TEMP}
       ],
     ),
   ],
+  "register.ts": [
+    ...ways(
+      "      const up = dirname(here);\n      if (up === here) return undefined;",
+      [
+        "the search climbs past the root rather than stopping at it",
+        "      const up = dirname(here);\n      if (false) return undefined;",
+      ],
+    ),
+    ...ways(
+      "      return here;",
+      [
+        "the directory holding the config is not the one reported",
+        "      return dirname(here);",
+      ],
+    ),
+    ...ways(
+      "  if (root === undefined) {",
+      [
+        "a tree with no project is set up against nothing rather than refused",
+        "  if (false) {",
+      ],
+    ),
+  ],
   "cli/lsp.ts": [
     ...ways(
       'export const INNER: readonly string[] = ["deno", "lsp"];',
@@ -1775,8 +1798,18 @@ if (target === undefined || suite.length === 0) {
 const plan = PLANS[target];
 if (plan === undefined) throw new Error(`no mutations listed for ${target}`);
 
-const run = async (): Promise<number> =>
-  (await new Deno.Command(Deno.execPath(), {
+/** How long a suite gets before a mutant is treated as having broken it.
+ *
+ * A mutation can make code loop rather than fail, and a suite that never
+ * terminates is not caught and not survived, it is no answer, and it blocks
+ * every plan behind it. One arm here does exactly that: removing the stop
+ * condition from a directory walk climbs past the filesystem root forever.
+ *
+ * Generous, because a slow machine running a real `deno check` is not a hang. */
+const PATIENCE = 120_000;
+
+const run = async (): Promise<number> => {
+  const child = new Deno.Command(Deno.execPath(), {
     // `--unstable-worker-options` is what lets a worker be spawned with a
     // permission set at all, and the sandbox suite is nothing without it. It is
     // on the package's own test task for the same reason, so a run here that
@@ -1784,7 +1817,25 @@ const run = async (): Promise<number> =>
     args: ["test", "-A", "--quiet", "--unstable-worker-options", ...suite],
     stdout: "null",
     stderr: "null",
-  }).output()).code;
+  }).spawn();
+
+  const timer = setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // it finished between the check and the kill, which is the ordinary race
+    }
+  }, PATIENCE);
+
+  try {
+    const { code, signal } = await child.status;
+    // killed for taking too long counts as broken, which it is: a suite that
+    // will not finish has noticed the mutation in the loudest way available
+    return signal !== null ? 1 : code;
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 // The baseline, because every mutation is reported caught when the suite is already
 // failing, and the run then looks like a clean sweep. This cost an afternoon once.
@@ -1807,6 +1858,23 @@ const LOCK = Deno.env.get("MUTATE_LOCK") ?? ".mutate.lock";
 try {
   await Deno.writeTextFile(LOCK, `${Deno.pid}\n`, { createNew: true });
 } catch (err) {
+  // A `finally` does not run when the process is killed, and a run interrupted
+  // while a mutation is in the file leaves that mutation in the source. It looks
+  // like an edit somebody made, and the next run reports the suite already red
+  // rather than saying why. So the source goes back on the way out too.
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    Deno.addSignalListener(signal, () => {
+      Deno.writeTextFileSync(target, original);
+      // and the lock, which is the same defect one layer up: a run killed while
+      // holding it leaves every later run refusing to start
+      try {
+        Deno.removeSync(LOCK);
+      } catch {
+        // already gone, which is fine
+      }
+      Deno.exit(130);
+    });
+  }
   if (!(err instanceof Deno.errors.AlreadyExists)) throw err;
   console.error(
     `${LOCK} is held, so a mutation run is already editing the tree. Wait for it,`,
@@ -1816,6 +1884,7 @@ try {
 }
 
 const original = await Deno.readTextFile(target);
+
 const survived: string[] = [];
 try {
   for (const m of plan) {
