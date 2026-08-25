@@ -1724,10 +1724,10 @@ ${DROP_TEMP}
   ],
   "src/version.ts": [
     ...ways(
-      'export const VERSION = "0.1.0";',
+      'export const VERSION = "0.2.0";',
       [
         "the reported version drifts from the published one",
-        'export const VERSION = "0.1.1";',
+        'export const VERSION = "0.2.1";',
       ],
       [
         "the reported version is not a version at all",
