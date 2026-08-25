@@ -20,23 +20,11 @@ import {
   assertStrictEquals,
 } from "@std/assert";
 import { registry } from "../src/macro.ts";
-import { interesting, Twins, watch } from "../src/watch.ts";
+import { macros, named } from "./macro_helpers.ts";
+import { Twins, watch } from "../src/watch.ts";
+import { interesting } from "../src/syntax.ts";
 import { sourceOffset } from "../src/spans.ts";
 import { expand } from "../src/expand.ts";
-
-const named = (e: ts.Expression) => ts.isIdentifier(e) ? e.text : "";
-
-/** `cfg` again, keeping its item only for `deno`. Enough that a twin differs from
- * its source, which is what every assertion below turns on. */
-function macros() {
-  return registry([{
-    kind: "attribute",
-    name: "cfg",
-    expand: (args: readonly ts.Expression[], item: { node: ts.Statement }) =>
-      named(args[0]!) === "deno" ? [item.node] : [],
-    // deno-lint-ignore no-explicit-any
-  } as any]);
-}
 
 const KEPT = `[cfg(deno)]\nfunction kept() {\n  return 1;\n}\n`;
 const DROPPED = `[cfg(node)]\nfunction gone() {\n  return 1;\n}\n`;

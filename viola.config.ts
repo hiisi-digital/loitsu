@@ -34,10 +34,28 @@ export default viola()
   // threshold asks for a shared constant, and a test comparing a constant to
   // itself has stopped testing anything. they still show in the locations
   // list, they just do not push a string over the threshold on their own.
+  // a mutation plan quotes the source it mutates, verbatim, because the tool
+  // matches on that text and refuses a pattern that finds nothing. so an arm
+  // and the line it weakens are the same string on purpose, and several arms
+  // over one function share most of it. extracting any of that to a constant
+  // would stop the plan matching, which is the tool telling us the rule does
+  // not apply here rather than us deciding it should not.
   .set("duplicate-strings.countIn", [
     "**",
     "!**/*_test.ts",
     "!**/*.test.ts",
     "!**/tests/**",
     "!**/fixtures/**",
-  ]);
+    "!tools/mutate.ts",
+  ])
+  // three different things spelled the same way: the two verbs this tool
+  // answers to, the `build` directory a walk stays out of, and the `check`
+  // deno's own command line takes. the rule wants one constant where one
+  // concept repeats, and there is no one concept here.
+  //
+  // `ignoreDeclaredVocabulary` would have covered the verbs and does not,
+  // because it recognises a string-literal union and an enum, and the verbs are
+  // an `as const` array with the union derived off it by `typeof VERBS[number]`.
+  // that is the idiomatic way to declare a vocabulary you also want to iterate,
+  // and it is filed against viola rather than worked around further.
+  .set("duplicate-strings.ignoreStrings", ["build", "check"]);

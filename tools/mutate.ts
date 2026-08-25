@@ -53,6 +53,11 @@ const NEVER_CONTINUE = "    if (false) continue;";
 /** The same two shapes at the indentation a nested block sits at. */
 const NEVER_CONTINUE_IN = "        if (false) continue;";
 const NEVER_IN = "    if (false) {";
+/** The same, at the indentation a function body sits at. */
+const NEVER_TOP = "  if (false) {";
+/** The head of the header line `frame` writes. Shared by the mutation that leaves it
+ * alone and the one that changes how the block ends, so the two cannot drift. */
+const WROTE = "    `Content-Length: ${body.length}";
 /** A statement removed by replacing it with one that does nothing, which is how a
  * step whose absence has to be noticed downstream is tested. */
 const DOES_NOTHING = "  void 0;";
@@ -64,6 +69,17 @@ const ITEM_END = "to = use.target.getEnd();";
 /** The store's cleanup. In both halves of one mutation, which swaps the `catch` it
  * hangs off for a `finally` and so has to repeat the body it keeps. */
 const DROP_TEMP = "    await Deno.remove(temp).catch(() => {});";
+
+/** Fragments two anchors share, named because a mutation plan is mostly one
+ * line written twice and the gate is right to say so. */
+const PASS_RANGE = "        return onRange(open.mapping, range);";
+const PASS_POINT = "        return onPoint(open.mapping, at);";
+const NOT_HELD = "        if (open === undefined) return undefined;";
+const DOWN_RANGE = "    (mapping, range) => mapping.toTwinRanges(range)[0],";
+const UP_RANGE = "    (mapping, range) => mapping.toSourceRanges(range)[0],";
+const POINT_UNCROSSED = "    (mapping, at) => at,";
+const FORGET_OPEN = "    this.#open.delete(uri);";
+const A_MAPPING = "      mapping: new Mapping({";
 
 /**
  * Several mutations of one line.
@@ -653,6 +669,120 @@ const PLANS: Record<string, readonly Mutation[]> = {
       to: NEVER,
     },
   ],
+  // The seam itself. Every arm here is a way the hook could look installed and
+  // hand the runtime something it should not have: the source instead of the
+  // twin, a twin without the format that makes it loadable, or an expansion of
+  // a file nobody asked to expand.
+  // `interesting` decides which files anything here looks at, so it sits under
+  // the watcher and under every seam `install` puts in front of a loader. It
+  // moved out of the watcher when the seams needed it, and its arms came with
+  // it rather than being left behind pointing at text that had gone.
+  "src/syntax.ts": [
+    ...ways(
+      "  return source && !declaration;",
+      ["declaration files are expanded too", "  return source;"],
+      ["everything is interesting", "  return true;"],
+    ),
+    ...ways(
+      '  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) =>',
+      [
+        "the module extensions are ignored",
+        '  const source = [".ts", ".tsx"].some((e) =>',
+      ],
+    ),
+    ...ways(
+      '  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>',
+      [
+        "only the plain declaration form is refused",
+        '  const declaration = [".d.ts"].some((e) =>',
+      ],
+    ),
+  ],
+  "src/install.ts": [
+    ...ways(
+      "  if (path === undefined || !matches(path)) return got;",
+      [
+        "every file is expanded, whatever the filter says",
+        NEVER_TOP,
+      ],
+      [
+        "a specifier that is not a file is expanded as though it were one",
+        "  if (!matches(path as string)) return got;",
+      ],
+    ),
+    ...ways(
+      "  return { ...got, source: rewrite(path, text), shortCircuit: true };",
+      [
+        "the format the runtime worked out is dropped, so a twin reaches V8 with its types on",
+        "  return { source: rewrite(path, text), shortCircuit: true } as NodeLoaded;",
+      ],
+      [
+        "the load is not claimed, so whatever runs next may overwrite the twin",
+        "  return { ...got, source: rewrite(path, text) };",
+      ],
+      [
+        "the twin is thrown away and the source goes on",
+        "  return got;",
+      ],
+    ),
+    ...ways(
+      '  const text = typeof got.source === "string"',
+      [
+        "bytes are handed to the expansion as though they were text",
+        "  const text = (true as boolean)",
+      ],
+    ),
+    ...ways(
+      "          contents: matches(args.path) ? rewrite(args.path, text) : text,",
+      [
+        "bun expands every file its pattern reaches, filter or not",
+        "          contents: rewrite(args.path, text),",
+      ],
+      [
+        "bun expands nothing, and the plugin is decoration",
+        "          contents: text,",
+      ],
+    ),
+    ...ways(
+      '          loader: args.path.endsWith("x") ? "tsx" : "ts",',
+      [
+        "a tsx file is handed to bun as plain ts",
+        '          loader: "ts",',
+      ],
+    ),
+    ...ways(
+      "  const matches = options.matches ?? interesting;",
+      [
+        "the default filter is gone, so an install without one expands nothing",
+        "  const matches = options.matches ?? (() => false);",
+      ],
+      [
+        "the default filter is everything, including files with no bodies to expand",
+        "  const matches = options.matches ?? (() => true);",
+      ],
+    ),
+    ...ways(
+      "    if (builtin?.registerHooks === undefined) {",
+      [
+        "a runtime too old for the hook is left to fail somewhere else",
+        NEVER_IN,
+      ],
+    ),
+    ...ways(
+      "      host: (globalThis as Partial<HasDeno>).Deno === undefined",
+      [
+        "deno is reported as node, so a caller cannot tell which seam it got",
+        "      host: (true as boolean)",
+      ],
+    ),
+    ...ways(
+      '  if (!url.startsWith("file://")) return undefined;',
+      [
+        "a data or builtin specifier is treated as a path on disk",
+        NEVER_TOP,
+      ],
+    ),
+  ],
   "src/watch.ts": [
     // Everything else in the suite injects a reader, so nothing else would notice
     // the default one going away. It is what a consumer actually gets.
@@ -731,25 +861,6 @@ const PLANS: Record<string, readonly Mutation[]> = {
       from: "        path,",
       to: "        undefined,",
     },
-    ...ways(
-      "  return source && !declaration;",
-      ["declaration files are expanded too", "  return source;"],
-      ["everything is interesting", "  return true;"],
-    ),
-    ...ways(
-      '  const source = [".ts", ".tsx", ".mts", ".cts"].some((e) =>',
-      [
-        "the module extensions are ignored",
-        '  const source = [".ts", ".tsx"].some((e) =>',
-      ],
-    ),
-    ...ways(
-      '  const declaration = [".d.ts", ".d.mts", ".d.cts"].some((e) =>',
-      [
-        "only the plain declaration form is refused",
-        '  const declaration = [".d.ts"].some((e) =>',
-      ],
-    ),
     {
       what: "a deleted file keeps its twin instead of being forgotten",
       from: "      else options.twins.forget(path);",
@@ -971,6 +1082,688 @@ ${DROP_TEMP}
       from: "round < rounds;",
       to: "round < rounds * 1000;",
     },
+  ],
+
+  "src/rpc.ts": [
+    ...ways(
+      "      if (hay[at + i] !== needle[i]) continue outer;",
+      [
+        "every byte compares equal, so a separator is found at the first offset",
+        "      if (false) continue outer;",
+      ],
+    ),
+    ...ways(
+      "  outer: for (let at = from; at + needle.length <= hay.length; at++) {",
+      [
+        "a separator ending exactly at the buffer's end is not found",
+        "  outer: for (let at = from; at + needle.length < hay.length; at++) {",
+      ],
+    ),
+    ...ways(
+      "const LENGTH = /^content-length$/i;",
+      [
+        "the length field is matched case-sensitively",
+        "const LENGTH = /^content-length$/;",
+      ],
+    ),
+    ...ways(
+      "    if (!LENGTH.test(line.slice(0, at).trim())) continue;",
+      [
+        "any header field is read as the length, so Content-Type decides it",
+        NEVER_CONTINUE,
+      ],
+    ),
+    ...ways(
+      "    if (!/^[0-9]+$/.test(said)) {",
+      [
+        "a length that is not a plain count is passed to Number and believed",
+        NEVER_IN,
+      ],
+    ),
+    ...ways(
+      '  throw new FramingError("a header block carried no content-length");',
+      [
+        "a header with no length reads a body of nothing instead of refusing",
+        "  return 0;",
+      ],
+    ),
+    ...ways(
+      "      if (this.#held.length - from < length) return out;",
+      [
+        "a body that has not all arrived is decoded anyway",
+        "      if (false) return out;",
+      ],
+      [
+        "a body that has exactly arrived is held back forever",
+        "      if (this.#held.length - from <= length) return out;",
+      ],
+    ),
+    ...ways(
+      "      this.#held = this.#held.slice(from + length);",
+      [
+        "the body is left in the buffer, so the next drain reads it as a header",
+        "      this.#held = this.#held.slice(from);",
+      ],
+    ),
+    ...ways(
+      "      const body = this.#decoder.decode(\n        this.#held.subarray(from, from + length),\n      );",
+      [
+        "the decode runs past the body into whatever followed it",
+        "      const body = this.#decoder.decode(this.#held.subarray(from));",
+      ],
+    ),
+    ...ways(
+      "    grown.set(chunk, this.#held.length);",
+      [
+        "a new chunk overwrites what was held instead of following it",
+        "    grown.set(chunk, 0);",
+      ],
+    ),
+    ...ways(
+      `${WROTE}\\r\\n\\r\\n\`,`,
+      [
+        "the written count is utf-16 units rather than bytes",
+        "    `Content-Length: ${JSON.stringify(message).length}\\r\\n\\r\\n`,",
+      ],
+      [
+        "the written header block ends in bare newlines",
+        `${WROTE}\\n\\n\`,`,
+      ],
+    ),
+    ...ways(
+      "  if (frames.pending > 0) {",
+      [
+        "a stream ending mid-message is treated as having ended cleanly",
+        NEVER_TOP,
+      ],
+    ),
+  ],
+
+  "src/protocol.ts": [
+    ...ways(
+      '    : isRecord(value.textDocument) && typeof value.textDocument.uri === "string"\n    ? value.textDocument.uri',
+      [
+        "the uri under textDocument is not read, so a documentChanges edit crosses nowhere",
+        "    : false\n    ? value.textDocument.uri",
+      ],
+    ),
+    ...ways(
+      '    typeof value.character === "number";',
+      [
+        "a line alone is read as a position, so an offset pair becomes one",
+        "    true;",
+      ],
+    ),
+    ...ways(
+      "  return isRecord(value) && isPosition(value.start) && isPosition(value.end);",
+      [
+        "the two names alone make a range, whatever sits under them",
+        '  return isRecord(value) && "start" in value && "end" in value;',
+      ],
+    ),
+    ...ways(
+      "  if (isRange(value)) {",
+      [
+        "a range crosses as its two ends separately rather than as a run",
+        NEVER_TOP,
+      ],
+    ),
+    ...ways(
+      "    return crossing.range(value, uri) ?? DROPPED;",
+      [
+        "a range with no image is kept as it was instead of dropped",
+        "    return crossing.range(value, uri) ?? value;",
+      ],
+    ),
+    ...ways(
+      "  if (isPosition(value)) return crossing.point(value, uri) ?? DROPPED;",
+      [
+        "a position with no image is kept as it was instead of dropped",
+        "  if (isPosition(value)) return crossing.point(value, uri) ?? value;",
+      ],
+    ),
+    ...ways(
+      "      if (crossed !== DROPPED) out.push(crossed);",
+      [
+        "a dropped element is kept, so the marker itself lands in the message",
+        "      out.push(crossed);",
+      ],
+    ),
+    ...ways(
+      "    if (crossed === DROPPED) return DROPPED;",
+      [
+        "dropping does not climb out of the object it happened in",
+        "    if (false) return DROPPED;",
+      ],
+    ),
+    ...ways(
+      "  const here = named ?? uri;",
+      [
+        "a document naming itself is ignored for everything under it",
+        "  const here = uri;",
+      ],
+      [
+        "the ambient document is dropped rather than carried down",
+        "  const here = named;",
+      ],
+    ),
+    ...ways(
+      '    const crossed = key === "changes" && isChanges(one)',
+      [
+        "a workspace edit's keys stop naming the documents they edit",
+        "    const crossed = false && isChanges(one)",
+      ],
+      [
+        "anything called changes is treated as a map of documents to edits",
+        '    const crossed = key === "changes"',
+      ],
+    ),
+    ...ways(
+      "    const crossed = carry(edits, crossing, uri) as unknown[];",
+      [
+        "an edit list is crossed without knowing which document it edits",
+        "    const crossed = carry(edits, crossing, undefined) as unknown[];",
+      ],
+    ),
+    ...ways(
+      "    if (crossed.length === 0) continue;",
+      [
+        "a file whose edits all dropped still gets an empty entry, so an editor " +
+        "opens it to change nothing",
+        NEVER_CONTINUE,
+      ],
+    ),
+    ...ways(
+      "  return isRecord(value) && Object.values(value).every(Array.isArray);",
+      [
+        "a changes field whose values are not edit lists is read as one anyway",
+        "  return isRecord(value);",
+      ],
+    ),
+    ...ways(
+      "  if (Array.isArray(value)) {",
+      [
+        "a list is walked as an object, so nothing absorbs a drop",
+        NEVER_TOP,
+      ],
+    ),
+  ],
+
+  "src/server.ts": [
+    ...ways(
+      "      params: { ...params, textDocument: { ...doc, text: twin } },",
+      [
+        "the source goes down instead of the twin",
+        "      params: { ...params, textDocument: { ...doc, text: doc.text as string } },",
+      ],
+      [
+        "the twin goes down under a uri of its own",
+        "      params: { ...params, textDocument: { ...doc, uri: `${doc.uri}.twin`, text: twin } },",
+      ],
+    ),
+    ...ways(
+      "    params: { ...params, contentChanges: [{ text: twin }] },",
+      [
+        "a change carries the author's text rather than the twin",
+        "    params: { ...params, contentChanges: [{ text: String(params.x) }] },",
+      ],
+    ),
+    ...ways(
+      "    if (!isRecord(one) || one.range !== undefined) continue;",
+      [
+        "a change describing one range is treated as a whole document",
+        "    if (!isRecord(one)) continue;",
+      ],
+    ),
+    ...ways(
+      "  const replaced = isRecord(sync) ? { ...sync, change: FULL } : FULL;",
+      [
+        "the editor keeps whatever sync the inner server advertised",
+        "  const replaced = sync;",
+      ],
+      [
+        "the rest of the sync options are thrown away with the change kind",
+        "  const replaced = FULL;",
+      ],
+    ),
+    ...ways(
+      "    if (message.id != null && this.#initialising.delete(String(message.id))) {",
+      [
+        "every later answer under an initialize id is rewritten too",
+        "    if (message.id != null && this.#initialising.has(String(message.id))) {",
+      ],
+    ),
+    ...ways(
+      "      const text = textOf(message.method, message.params);\n      if (text === undefined) return;",
+      [
+        "a change carrying nothing this can apply is forwarded anyway",
+        '      const text = textOf(message.method, message.params) ?? "";',
+      ],
+    ),
+    ...ways(
+      "      this.#documents.closed(uri);",
+      [
+        "a closed document is still held",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    const down = crossed(message, this.#documents.down, uri);",
+      [
+        "a message going down is crossed in the wrong direction",
+        "    const down = crossed(message, this.#documents.up, uri);",
+      ],
+      [
+        "a message going down is not crossed at all",
+        "    const down = message as typeof message | typeof DROPPED;",
+      ],
+    ),
+    ...ways(
+      "    if (id == null) return;",
+      [
+        "a request naming text with no twin is never answered",
+        NEVER_RETURN,
+      ],
+    ),
+    ...ways(
+      "    const up = crossed(message, this.#documents.up, uriOf(message.params));",
+      [
+        "a message coming up is crossed in the wrong direction",
+        "    const up = crossed(message, this.#documents.down, uriOf(message.params));",
+      ],
+      [
+        "a message coming up is not crossed at all",
+        "    const up = message as typeof message | typeof DROPPED;",
+      ],
+    ),
+    ...ways(
+      "    if (images.length < 2) return false;",
+      [
+        "a name landing in one place is still fanned out",
+        "    if (images.length < 1) return false;",
+      ],
+      [
+        "a name landing in several places is asked about once",
+        "    if (images.length < 99) return false;",
+      ],
+    ),
+    ...ways(
+      "        params: { ...params, position: image.start },",
+      [
+        "every arm is asked about the place the editor named",
+        "        params: { ...params },",
+      ],
+    ),
+    ...ways(
+      "          if (already.some((one) => JSON.stringify(one) === same)) continue;",
+      [
+        "the same authored edit is reported once per arm",
+        NEVER_CONTINUE_IN,
+      ],
+    ),
+    ...ways(
+      "    if (waiting.owed > 0) return;",
+      [
+        "the sum goes out on the first arm to answer",
+        NEVER_RETURN,
+      ],
+    ),
+    ...ways(
+      "      id: waiting.id,",
+      [
+        "the sum is sent under an id the editor never asked about",
+        "      id: -1,",
+      ],
+    ),
+    ...ways(
+      "    const up = crossed(message.result, this.#documents.up, undefined);",
+      [
+        "an arm's edits stay in twin coordinates",
+        "    const up = message.result as unknown;",
+      ],
+    ),
+  ],
+  "src/documents.ts": [
+    ...ways(
+      "        return held === undefined ? disk(path) : Promise.resolve(held);",
+      [
+        "a twin is built from the file on disk rather than the editor's buffer",
+        "        return disk(path);",
+      ],
+    ),
+    ...ways(
+      "    this.#held.set(path, source);",
+      [
+        "what the editor holds is never handed to the expansion",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    await this.#twins.changed(path);",
+      [
+        "a change is not acknowledged, so a stale twin is served after an edit",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "      twin: twin?.code ?? source,\n" + A_MAPPING,
+      [
+        "the source stands in for the twin even when one was built",
+        "      twin: source,\n" + A_MAPPING,
+      ],
+    ),
+    ...ways(
+      "        spans: twin?.spans ?? identity(source.length),",
+      [
+        "every document maps as though nothing was expanded",
+        "        spans: identity(source.length),",
+      ],
+    ),
+    ...ways(
+      "    this.#open.set(uri, open);",
+      [
+        "an opened document is not remembered",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    if (open === undefined) return;\n" + FORGET_OPEN,
+      [
+        "closing a document nobody opened throws instead of doing nothing",
+        NEVER_RETURN + "\n" + FORGET_OPEN,
+      ],
+    ),
+    ...ways(
+      "    this.#held.delete(open.path);",
+      [
+        "a closed document's buffer is kept, so its twin never comes from disk again",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    this.#twins.forget(open.path);",
+      [
+        "a closed document's twin is kept",
+        DOES_NOTHING,
+      ],
+    ),
+    ...ways(
+      "    return [...this.#held.keys()].sort();",
+      [
+        "nothing is ever reported as buffered",
+        "    return [];",
+      ],
+    ),
+    ...ways(
+      "    return this.#twins.failure(fromFileUrl(uri));",
+      [
+        "a twin that failed to build is never reported as having failed",
+        "    return undefined;",
+      ],
+    ),
+    ...ways(
+      "    return this.#open.get(uri)?.mapping.toTwinRanges(range) ?? [range];",
+      [
+        "a range in a document this does not hold has no images at all",
+        "    return this.#open.get(uri)?.mapping.toTwinRanges(range) ?? [];",
+      ],
+    ),
+    ...ways(
+      "        if (open === undefined) return range;\n" + PASS_RANGE,
+      [
+        "a range in another file is dropped instead of passed on",
+        NOT_HELD + "\n" + PASS_RANGE,
+      ],
+    ),
+    ...ways(
+      "        if (open === undefined) return at;\n" + PASS_POINT,
+      [
+        "a position in another file is dropped instead of passed on",
+        NOT_HELD + "\n" + PASS_POINT,
+      ],
+    ),
+    ...ways(
+      DOWN_RANGE,
+      [
+        "a range going down is crossed in the wrong direction",
+        UP_RANGE,
+      ],
+    ),
+    ...ways(
+      "    (mapping, at) => mapping.toTwin(at)[0],",
+      [
+        "a position going down is not crossed at all",
+        POINT_UNCROSSED,
+      ],
+    ),
+    ...ways(
+      UP_RANGE,
+      [
+        "a range coming up is crossed in the wrong direction",
+        DOWN_RANGE,
+      ],
+    ),
+    ...ways(
+      "    (mapping, at) => mapping.toSource(at),",
+      [
+        "a position coming up is not crossed at all",
+        POINT_UNCROSSED,
+      ],
+    ),
+  ],
+  "cli/sources.ts": [
+    ...ways(
+      '  ".loitsu",\n  ".git",',
+      [
+        "the tool's own output is walked, so a second build expands the first",
+        '  ".git",',
+      ],
+    ),
+    ...ways(
+      "      if (skip.has(one.name)) continue;",
+      [
+        "a walk goes into the tool directories too",
+        "      if (false) continue;",
+      ],
+    ),
+    ...ways(
+      "    } else if (one.isFile && matches(path)) {",
+      [
+        "every file is a source, whatever its extension",
+        "    } else if (one.isFile) {",
+      ],
+    ),
+    ...ways(
+      "  const skip = new Set(options.skip ?? SKIPPED);",
+      [
+        "the skip list a caller hands over is ignored",
+        "  const skip = new Set(SKIPPED);",
+      ],
+    ),
+    ...ways(
+      "    for await (const one of entries) found.push(one);\n  } catch {\n    return;\n  }",
+      [
+        "a directory that cannot be read throws instead of being passed over",
+        "    for await (const one of entries) found.push(one);\n  } catch (why) {\n    throw why;\n  }",
+      ],
+    ),
+  ],
+  "cli/project.ts": [
+    ...ways(
+      '  if (found === null || typeof found !== "object") {',
+      [
+        "anything at all is accepted as the project",
+        "  if (false) {",
+      ],
+    ),
+    ...ways(
+      '    typeof registry.attribute !== "function" ||',
+      [
+        "a registry with no attribute side is accepted",
+        "    false ||",
+      ],
+    ),
+    ...ways(
+      '  if (typeof against !== "string" || against === "") {',
+      [
+        "an empty cache key is accepted, so an old twin can be served",
+        '  if (typeof against !== "string") {',
+      ],
+    ),
+  ],
+  "cli/build.ts": [
+    ...ways(
+      "    if (here === CONFIG) continue;",
+      [
+        "the config is expanded into a twin like any other source",
+        "    if (false) continue;",
+      ],
+    ),
+    ...ways(
+      "      spans: twin.spans,",
+      [
+        "no span table is carried, so nothing can be reported where it was written",
+        "      spans: undefined,",
+      ],
+    ),
+    ...ways(
+      "    if (twin.diagnostics.length > 0) failed++;",
+      [
+        "a file the expansion complained about is counted as fine",
+        "    if (false) failed++;",
+      ],
+    ),
+  ],
+  "cli/check.ts": [
+    ...ways(
+      "  if (built.files.length === 0) throw new NothingToCheck(options.root);",
+      [
+        "a run that looked at nothing reports a clean pass",
+        "  if (false) throw new NothingToCheck(options.root);",
+      ],
+    ),
+    ...ways(
+      "        line: at.line + 1,\n        column: at.character + 1,\n        message: why.message,",
+      [
+        "an expansion diagnostic is reported one line above where it is",
+        "        line: at.line,\n        column: at.character + 1,\n        message: why.message,",
+      ],
+      [
+        "an expansion diagnostic is reported one column left of where it is",
+        "        line: at.line + 1,\n        column: at.character,\n        message: why.message,",
+      ],
+    ),
+    ...ways(
+      "      line: at.line + 1,\n      column: at.character + 1,\n      message: one.code",
+      [
+        "a type diagnostic is reported one line above where it is",
+        "      line: at.line,\n      column: at.character + 1,\n      message: one.code",
+      ],
+    ),
+    ...ways(
+      "    const at = here.map.toSource({\n      line: one.line - 1,\n      character: one.column - 1,\n    });",
+      [
+        "a twin position is reported as if it were a source position",
+        "    const at = { line: one.line - 1, character: one.column - 1 };",
+      ],
+    ),
+  ],
+  "cli/diagnostics.ts": [
+    ...ways(
+      "    if (message === undefined) continue;",
+      [
+        "a position with no message above it is given an empty one",
+        '    if (message === undefined) message = "";',
+      ],
+    ),
+    ...ways(
+      "    message = undefined;",
+      [
+        "one message is attributed to every position under it",
+        "    message = message;",
+      ],
+    ),
+    ...ways(
+      "      line: Number(at[2]),\n      column: Number(at[3]),",
+      [
+        "line and column are read the wrong way round",
+        "      line: Number(at[3]),\n      column: Number(at[2]),",
+      ],
+    ),
+    ...ways(
+      "const AT = /^\\s+at (file:\\/\\/\\S+?):(\\d+):(\\d+)\\s*$/;",
+      [
+        "a position line is recognised anywhere in a line, not only indented",
+        "const AT = /at (file:\\/\\/\\S+?):(\\d+):(\\d+)\\s*$/;",
+      ],
+    ),
+  ],
+  "cli/mod.ts": [
+    ...ways(
+      "      return done.said.length > 0 ? 1 : 0;",
+      ["a check that found something still exits zero", "      return 0;"],
+    ),
+    ...ways(
+      "      return done.failed > 0 ? 1 : 0;",
+      [
+        "a build that could not expand something still exits zero",
+        "      return 0;",
+      ],
+    ),
+    ...ways(
+      "    return it.verb === undefined && !it.help ? 1 : 0;",
+      ["being handed no verb at all exits zero", "    return 0;"],
+    ),
+    ...ways(
+      '    if (one === "--") {\n      inner = args.slice(i + 1);',
+      [
+        "the command after -- is read one word short",
+        '    if (one === "--") {\n      inner = args.slice(i + 2);',
+      ],
+    ),
+  ],
+  "src/version.ts": [
+    ...ways(
+      'export const VERSION = "0.1.0";',
+      [
+        "the reported version drifts from the published one",
+        'export const VERSION = "0.1.1";',
+      ],
+      [
+        "the reported version is not a version at all",
+        'export const VERSION = "next";',
+      ],
+    ),
+  ],
+  "cli/lsp.ts": [
+    ...ways(
+      'export const INNER: readonly string[] = ["deno", "lsp"];',
+      [
+        "the default inner server is deno's checker rather than its language server",
+        'export const INNER: readonly string[] = ["deno", "check"];',
+      ],
+    ),
+    ...ways(
+      "  if (program === undefined) {",
+      [
+        "a command naming no program is spawned rather than refused",
+        "  if (false) {",
+      ],
+    ),
+    ...ways(
+      "      flush: () => ended(),",
+      [
+        "the editor going away is not noticed, so the inner process outlives it",
+        "      flush: () => {},",
+      ],
+    ),
+    ...ways(
+      "      incoming: endingWith(editor.incoming, stop),",
+      [
+        "the editor's end is passed through unwatched",
+        "      incoming: editor.incoming,",
+      ],
+    ),
   ],
 };
 

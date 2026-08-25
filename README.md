@@ -48,9 +48,47 @@ this tool knows about.
 
 ## Installation
 
+As a library, for the expansion and the map:
+
 ```bash
 deno add jsr:@hiisi/loitsu
 ```
+
+As a command, for building twins, checking them and fronting an editor:
+
+```bash
+deno install --global --allow-read --allow-write --allow-run --allow-env \
+  --name loitsu jsr:@hiisi/loitsu/cli
+```
+
+Or without installing:
+
+```bash
+deno run --allow-read --allow-write --allow-run --allow-env jsr:@hiisi/loitsu/cli
+```
+
+The permissions are the ones it needs and no more. It reads your sources, writes
+the twins, runs the type checker or the language server you point it at, and
+reads the environment those want.
+
+## The command
+
+Three verbs, and a project says where its macros are in a `loitsu.config.ts` at
+its root, which default-exports the registry and the name the cache is keyed on.
+
+```bash
+loitsu build                # write the twin tree, expanded, mirroring the sources
+loitsu check                # write it and type check it, reported where you wrote it
+loitsu lsp                  # proxy an editor to a language server, over the twins
+loitsu lsp -- <command>     # proxy to that one instead of `deno lsp`
+```
+
+`check` exists because `deno check` reads what is on disk and cannot see
+anything a running program registered, so what it checks has to already be
+expanded. `lsp` exists for the same reason on the editor's side: the inner
+server is handed the twin under your source's own uri and never learns the
+source is there, and every position in every message crosses back on the way
+out.
 
 ## Usage
 
@@ -305,12 +343,15 @@ came from.
 The api hasn't settled and breaking changes should be expected. I'd caution
 against using this for anything serious just yet.
 
-There's no editor integration yet, and no frontends. Expansion, the map, the
-cache and the watcher are here; a language server that serves the twin under
-your source uri and maps the diagnostics back is the next piece, and after that
-hooking into `deno check` and friends. The intent is that it just works once you
-depend on it, with at most a line in your `deno.json` or `package.json`, but
-that isn't true yet and I'd rather say so than let you find out.
+On node and bun the expansion goes in front of the loader, so a program reaches
+its own source already expanded once it names the installing module where the
+runtime reads one. Deno has no seam for checking, which is why `check` and `lsp`
+are commands rather than something you switch on: `deno check` reads disk, and
+an editor is fronted by the proxy rather than hooked.
+
+A hook reaches what is loaded after it, so a module imported alongside the one
+that calls `install` is already resolved by the time it runs. Reach your program
+with a dynamic import, or name the installing module first.
 
 Expansion is whole file at a time, not incremental. Fine at the sizes this has
 been used on, and would want attention before it isn't.
