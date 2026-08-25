@@ -63,10 +63,16 @@ export async function project(root: string): Promise<Project> {
   try {
     loaded = await import(toFileUrl(path).href);
   } catch (why) {
+    // Whether it is there and whether it loaded are two different answers, and
+    // reporting the second as the first sends somebody looking for a file they
+    // are staring at. The common first run on node is exactly this: the config
+    // exists, and node will not take an ESM `.ts` without `"type": "module"`.
+    const said = why instanceof Error ? why.message : String(why);
+    const missing = await Deno.stat(path).then(() => false).catch(() => true);
     throw new ProjectError(
-      `no ${CONFIG} at ${path}, and a run has no macros without one: ${
-        why instanceof Error ? why.message : String(why)
-      }`,
+      missing
+        ? `no ${CONFIG} at ${path}, and a run has no macros without one`
+        : `${path} is there and would not load, so this run has no macros: ${said}`,
     );
   }
 

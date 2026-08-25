@@ -20,7 +20,7 @@
  * @module
  */
 
-import { assert, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 
 /** This repository, so a fixture can reach the module under test. */
@@ -321,6 +321,88 @@ Deno.test("the working directory is found without asking for Deno", async () => 
     assertStringIncludes(out, "installed stub");
   } finally {
     await Deno.remove(root, { recursive: true });
+    await Deno.remove(where, { recursive: true });
+  }
+});
+
+// --------------------------------------------------------------------------
+// the spawn seam's other half
+// --------------------------------------------------------------------------
+
+/** `spawn.ts` where node can load it. It imports nothing, so it copies whole. */
+async function spawnCopy(): Promise<string> {
+  const dir = await Deno.makeTempDir({ prefix: "loitsu_spawn_" });
+  await Deno.writeTextFile(
+    join(dir, "spawn.ts"),
+    await Deno.readTextFile(join(HERE, "cli", "spawn.ts")),
+  );
+  return dir;
+}
+
+Deno.test("on node, a started program's stderr reaches ours", async () => {
+  if (!await have("node")) {
+    console.warn("node is not on this machine; nothing was checked here");
+    return;
+  }
+  const where = await spawnCopy();
+  try {
+    // inherited, so the noise the program makes on stderr comes out of this
+    // process's stderr. Piping or nulling it is how a language server that
+    // fails to start becomes indistinguishable from one that said nothing.
+    const { out } = await inRuntime("node", [
+      "--experimental-strip-types",
+      "--input-type=module",
+      "-e",
+      `const { start } = await import("${where}/spawn.ts");
+       const r = start("sh", ["-c", "echo noise >&2; sleep 0.2"]);
+       await new Promise((d) => setTimeout(d, 500));
+       r.kill();`,
+    ], where);
+    assertStringIncludes(out, "noise");
+  } finally {
+    await Deno.remove(where, { recursive: true });
+  }
+});
+
+/* No test here for a grandchild dying on node.
+ *
+ * There was one, and it passed against both arms of the thing it was meant to
+ * distinguish. `process.kill(-pid)` returns ESRCH on this platform whether the
+ * spawn was detached or not, so nothing about a wrapper's grandchild is
+ * observable through it, and the code no longer claims otherwise. What `start`
+ * does on node is kill the child, and that is what the plan constrains. */
+
+Deno.test("on node, killing closes the stream a wrapper held open", async () => {
+  if (!await have("node")) {
+    console.warn("node is not on this machine; nothing was checked here");
+    return;
+  }
+  const where = await spawnCopy();
+  try {
+    // a wrapper command. The child exits and a grandchild keeps the pipe open,
+    // so a reader waits forever on a program nobody can see. Only killing the
+    // group closes it, and only a detached spawn has a group to kill.
+    const { out } = await inRuntime("node", [
+      "--experimental-strip-types",
+      "--input-type=module",
+      "-e",
+      `const { start } = await import("${where}/spawn.ts");
+       const r = start("sh", ["-c", "sleep 30 & wait"]);
+       r.kill();
+       const done = (async () => {
+         for await (const _ of r.stdout) {}
+         return "closed";
+       })();
+       const late = new Promise((d) => setTimeout(() => d("held"), 4000));
+       console.log("stream", await Promise.race([done, late]));
+       process.exit(0);`,
+    ], where);
+    assertStringIncludes(
+      out,
+      "stream closed",
+      "a grandchild still held the pipe, so the stream never ended",
+    );
+  } finally {
     await Deno.remove(where, { recursive: true });
   }
 });

@@ -16,7 +16,8 @@
     "lint": "deno run -A gate.ts",
     "mutate": "deno run -A tools/mutate.ts",
     "mutate:all": "deno run -A tools/mutate_all.ts",
-    "bench": "deno bench --allow-read --allow-env --unstable-worker-options benches/"
+    "bench": "deno bench --allow-read --allow-env --unstable-worker-options benches/",
+    "build:npm": "deno run -A scripts/build-npm.ts"
   },
   "imports": {
     "@hiisi/viola": "jsr:@hiisi/viola@^0.4.0",

@@ -1775,6 +1775,29 @@ ${DROP_TEMP}
       ],
     ),
   ],
+  "cli/spawn.ts": [
+    ...ways(
+      "  return found?.Command !== undefined;",
+      [
+        "a runtime with a partial Deno is taken for a whole one",
+        "  return found !== undefined;",
+      ],
+    ),
+    ...ways(
+      '      stderr: "inherit",',
+      [
+        "the inner server's own diagnostics are swallowed",
+        '      stderr: "null",',
+      ],
+    ),
+    ...ways(
+      '        child.kill("SIGTERM");',
+      [
+        "a started program is never stopped",
+        "        void 0;",
+      ],
+    ),
+  ],
   "cli/lsp.ts": [
     ...ways(
       'export const INNER: readonly string[] = ["deno", "lsp"];',
@@ -1825,7 +1848,12 @@ if (plan === undefined) throw new Error(`no mutations listed for ${target}`);
  * Generous, because a slow machine running a real `deno check` is not a hang. */
 const PATIENCE = 120_000;
 
-const run = async (): Promise<number> => {
+/** The suite, run once, bounded.
+ *
+ * Not `run`: `cli/spawn.ts` has one of that name taking a program and its
+ * arguments, and two functions of one name with different signatures is a thing
+ * to get wrong later. */
+const runSuite = async (): Promise<number> => {
   const child = new Deno.Command(Deno.execPath(), {
     // `--unstable-worker-options` is what lets a worker be spawned with a
     // permission set at all, and the sandbox suite is nothing without it. It is
@@ -1861,7 +1889,7 @@ const TIMED_OUT = -1;
 
 // The baseline, because every mutation is reported caught when the suite is already
 // failing, and the run then looks like a clean sweep. This cost an afternoon once.
-if (await run() !== 0) {
+if (await runSuite() !== 0) {
   console.error(
     `${suite.join(" ")} is already failing; a mutation run against a red`,
   );
@@ -1927,7 +1955,7 @@ try {
       );
     }
     await Deno.writeTextFile(target, original.replace(m.from, m.to));
-    const code = await run();
+    const code = await runSuite();
     if (code === 0) survived.push(m.what);
     if (code === TIMED_OUT) hung.push(m.what);
     console.log(

@@ -20,7 +20,7 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import { join, resolve } from "@std/path";
-import { CONFIG } from "../cli/project.ts";
+import { CONFIG, project } from "../cli/project.ts";
 import { register, RegisterError, rootFrom } from "../register.ts";
 
 /** A tree with a config at its root and a few levels under it. */
@@ -133,6 +133,36 @@ Deno.test("a config that cannot be read is not reported as one that is not there
       );
     } finally {
       await Deno.chmod(shut, 0o755);
+    }
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("a config that is there but will not load says so, not that it is missing", async () => {
+  const root = await Deno.makeTempDir({ prefix: "loitsu_bad_" });
+  try {
+    // the most common first run on node is exactly this: the file exists and the
+    // runtime refuses it. Reporting that as "no config here" sends somebody
+    // looking for a file they are staring at.
+    await Deno.writeTextFile(
+      join(root, CONFIG),
+      "this is not typescript {{{\n",
+    );
+    const why = await assertRejects(() => project(root));
+    assertStringIncludes(String(why), "is there and would not load");
+    assert(
+      !String(why).includes(`no ${CONFIG} at`),
+      "a config that exists must not be reported as absent",
+    );
+
+    // the control: with no file at all, it does say that
+    const bare = await Deno.makeTempDir({ prefix: "loitsu_none2_" });
+    try {
+      const gone = await assertRejects(() => project(bare));
+      assertStringIncludes(String(gone), `no ${CONFIG} at`);
+    } finally {
+      await Deno.remove(bare, { recursive: true });
     }
   } finally {
     await Deno.remove(root, { recursive: true });
