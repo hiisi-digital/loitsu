@@ -1700,6 +1700,43 @@ ${DROP_TEMP}
       "    return it.verb === undefined && !it.help ? 1 : 0;",
       ["being handed no verb at all exits zero", "    return 0;"],
     ),
+    ...ways(
+      '    if (one === "--") {\n      inner = args.slice(i + 1);',
+      [
+        "the command after -- is read one word short",
+        '    if (one === "--") {\n      inner = args.slice(i + 2);',
+      ],
+    ),
+  ],
+  "cli/lsp.ts": [
+    ...ways(
+      'export const INNER: readonly string[] = ["deno", "lsp"];',
+      [
+        "the default inner server is deno's checker rather than its language server",
+        'export const INNER: readonly string[] = ["deno", "check"];',
+      ],
+    ),
+    ...ways(
+      "  if (program === undefined) {",
+      [
+        "a command naming no program is spawned rather than refused",
+        "  if (false) {",
+      ],
+    ),
+    ...ways(
+      "      flush: () => ended(),",
+      [
+        "the editor going away is not noticed, so the inner process outlives it",
+        "      flush: () => {},",
+      ],
+    ),
+    ...ways(
+      "      incoming: endingWith(editor.incoming, stop),",
+      [
+        "the editor's end is passed through unwatched",
+        "      incoming: editor.incoming,",
+      ],
+    ),
   ],
 };
 

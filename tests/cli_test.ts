@@ -32,7 +32,7 @@ import { asked, main, USAGE, VERBS } from "../cli/mod.ts";
 /** The two verbs, named once here so the fixtures below read as invocations
  * rather than as a spelling test. What they are actually spelled is pinned in
  * `names every verb in the usage`, and nowhere else. */
-const [BUILD, CHECK] = VERBS;
+const [BUILD, CHECK, LSP] = VERBS;
 
 /** This repo, so a fixture config can import the registry from where it lives. */
 const HERE = new URL("../", import.meta.url).href;
@@ -383,8 +383,10 @@ describe("reading arguments", () => {
     // The one place the verbs are spelled out, and joined rather than listed
     // so that it is one literal naming the whole set. Everything else names
     // them through `VERBS`, so a rename is one edit and this is what catches it.
-    assertEquals(VERBS.join(" "), "build check");
+    assertEquals(VERBS.join(" "), "build check lsp");
     for (const one of VERBS) assertStringIncludes(USAGE, one);
+    // and the one that takes something after `--`, which nothing else does
+    assertStringIncludes(USAGE, `${LSP} `);
   });
 });
 

@@ -26,6 +26,9 @@ export { SKIPPED, sources } from "./sources.ts";
 export type { SourceOptions } from "./sources.ts";
 export { reported } from "./diagnostics.ts";
 export type { Reported } from "./diagnostics.ts";
+import { LspError } from "./lsp.ts";
+export { INNER, lsp, LspError, spawn, stdio } from "./lsp.ts";
+export type { LspOptions } from "./lsp.ts";
 
 /** Where twins go when nobody says otherwise. Under the project, so a relative
  * import in a twin resolves the way the same import in the source does. */
@@ -36,7 +39,7 @@ export const OUT = ".loitsu/twins";
  * One list rather than a literal at each of the three places that names a verb,
  * so the dispatch, the usage and the tests cannot end up disagreeing about
  * which verbs exist. */
-export const VERBS = ["build", "check"] as const;
+export const VERBS = ["build", "check", "lsp"] as const;
 
 /** One of the verbs, as a type, so a typo in a comparison will not compile. */
 export type Verb = typeof VERBS[number];
@@ -48,6 +51,8 @@ interface Arguments {
   readonly out: string;
   readonly help: boolean;
   readonly version: boolean;
+  /** The inner language server, when something after `--` names one. */
+  readonly inner: readonly string[] | undefined;
 }
 
 /** Reads the arguments, taking the last of any repeated flag. */
@@ -57,9 +62,16 @@ export function asked(args: readonly string[]): Arguments {
   let out: string | undefined;
   let help = false;
   let version = false;
+  let inner: string[] | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const one = args[i];
+    // everything past `--` is the command to run, not this tool's business,
+    // so it is taken whole rather than parsed for flags this tool would claim
+    if (one === "--") {
+      inner = args.slice(i + 1);
+      break;
+    }
     if (one === "-h" || one === "--help") help = true;
     else if (one === "-V" || one === "--version") version = true;
     else if (one === "--root" && i + 1 < args.length) root = args[++i];
@@ -67,7 +79,14 @@ export function asked(args: readonly string[]): Arguments {
     else if (!one.startsWith("-") && verb === undefined) verb = one;
   }
 
-  return { verb, root, out: out ?? `${root}/${OUT}`, help, version };
+  return {
+    verb,
+    root,
+    out: out ?? `${root}/${OUT}`,
+    help,
+    version,
+    inner: inner !== undefined && inner.length > 0 ? inner : undefined,
+  };
 }
 
 /** What the tool says when asked, and when asked for something it has not got. */
@@ -80,12 +99,15 @@ USAGE:
 VERBS:
   build             Write the twin tree, expanded, mirroring the sources
   check             Write it and type check it, reported where you wrote it
+  lsp               Proxy an editor to a language server, over the twins
 
 OPTIONS:
   --root <dir>      The tree to read. Defaults to the working directory
   --out <dir>       Where twins go. Defaults to <root>/${OUT}
   -h, --help        This
   -V, --version     The version
+  -- <command>      lsp only. The language server to proxy. Defaults to
+                    \`deno lsp\`
 
 Macros come from ${CONFIG} at the root, which default-exports the registry and
 the name the cache is keyed on.
@@ -127,11 +149,20 @@ export async function main(args: readonly string[]): Promise<number> {
       return done.said.length > 0 ? 1 : 0;
     }
 
+    if (it.verb === VERBS[2]) {
+      const { lsp } = await import("./lsp.ts");
+      await lsp(found, { inner: it.inner });
+      return 0;
+    }
+
     console.error(`no verb ${JSON.stringify(it.verb)}`);
     console.log(USAGE);
     return 1;
   } catch (why) {
-    if (why instanceof ProjectError || why instanceof NothingToCheck) {
+    if (
+      why instanceof ProjectError || why instanceof NothingToCheck ||
+      why instanceof LspError
+    ) {
       console.error(why.message);
       return 1;
     }

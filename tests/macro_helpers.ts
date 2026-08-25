@@ -16,6 +16,18 @@
 import ts from "typescript";
 import { registry } from "../src/macro.ts";
 
+/**
+ * A byte pipe that buffers, for driving something that reads and writes streams.
+ *
+ * A `TransformStream` on its defaults holds nothing, so a write blocks until
+ * somebody reads. That is right against a real process, which reads all the time,
+ * and a deadlock against a test that sends two messages and then looks at what
+ * came out.
+ */
+export function pipe(): TransformStream<Uint8Array, Uint8Array> {
+  return new TransformStream(undefined, undefined, { highWaterMark: 64 });
+}
+
 /** The name of an identifier argument, and nothing for anything else. */
 export const named = (e: ts.Expression): string =>
   ts.isIdentifier(e) ? e.text : "";

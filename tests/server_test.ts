@@ -13,7 +13,7 @@ import { assert, assertEquals } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Server } from "../src/server.ts";
 import { frame, type Message, messages } from "../src/rpc.ts";
-import { doubling, macros } from "./macro_helpers.ts";
+import { doubling, macros, pipe } from "./macro_helpers.ts";
 
 const HERE = toFileUrl("/proj/src/a.ts").href;
 
@@ -22,18 +22,6 @@ const BOTH = `export function untouched(who: string): string {\n` +
   `  return \`hei \${who}\`;\n}\n\n` +
   `[cfg(deno)]\nfunction kept() {\n  return 1;\n}\n` +
   `[cfg(node)]\nfunction gone() {\n  return 2;\n}\n`;
-
-/**
- * A pipe that buffers, because the proxy waits for its writes to be taken.
- *
- * A `TransformStream` built with the defaults holds nothing, so a write blocks
- * until somebody reads. That is right against a real process, which reads all
- * the time, and a deadlock against a test that sends two messages and then looks
- * at what came out.
- */
-function pipe(): TransformStream<Uint8Array, Uint8Array> {
-  return new TransformStream(undefined, undefined, { highWaterMark: 64 });
-}
 
 /** One statement a macro emits twice, so every name in it has two images. */
 const DOUBLED = `[twice()]\nfunction hello() {\n  return 1;\n}\n`;
