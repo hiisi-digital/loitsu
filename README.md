@@ -71,6 +71,14 @@ The permissions are the ones it needs and no more. It reads your sources, writes
 the twins, runs the type checker or the language server you point it at, and
 reads the environment those want.
 
+On node and bun, where the expansion goes in front of the loader instead:
+
+```bash
+npx jsr add @hiisi/loitsu
+node --import @hiisi/loitsu/preload app.js
+bun --preload @hiisi/loitsu/preload app.ts
+```
+
 ## The command
 
 Three verbs, and a project says where its macros are in a `loitsu.config.ts` at
@@ -343,15 +351,29 @@ came from.
 The api hasn't settled and breaking changes should be expected. I'd caution
 against using this for anything serious just yet.
 
-On node and bun the expansion goes in front of the loader, so a program reaches
-its own source already expanded once it names the installing module where the
-runtime reads one. Deno has no seam for checking, which is why `check` and `lsp`
-are commands rather than something you switch on: `deno check` reads disk, and
-an editor is fronted by the proxy rather than hooked.
+On node and bun the expansion goes in front of the loader, and the line that
+puts it there names a module that already exists:
+
+```bash
+npx jsr add @hiisi/loitsu
+node --import @hiisi/loitsu/preload app.js
+bun --preload @hiisi/loitsu/preload app.ts
+```
+
+`preload` finds your `loitsu.config.ts` the way the command does, upward from
+where you are standing, and installs the macros it names. Nothing to write.
+
+There is no way to move that flag into `package.json`. Its `imports` field is a
+subpath map rather than a preload hook, and a static import in your own source
+is already too late, for the reason just below.
 
 A hook reaches what is loaded after it, so a module imported alongside the one
-that calls `install` is already resolved by the time it runs. Reach your program
-with a dynamic import, or name the installing module first.
+that installs is already resolved by the time it runs. Your program has to come
+after it on the command line, or be reached through a dynamic import.
+
+Deno needs none of that to run, since it executes TypeScript. What it cannot do
+is check text a running program registered, which is why `check` and `lsp` are
+commands rather than something you switch on.
 
 Expansion is whole file at a time, not incremental. Fine at the sizes this has
 been used on, and would want attention before it isn't.
